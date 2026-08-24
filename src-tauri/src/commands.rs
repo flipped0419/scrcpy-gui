@@ -751,6 +751,11 @@ pub struct ScrcpyConfig {
     /// the user left it, including when relaunching borderless.
     window_x: Option<i32>,
     window_y: Option<i32>,
+    // v4.1 features
+    /// Ignore video encoder size constraints entirely (scrcpy v4.1+).
+    /// Useful when the device reports incorrect encoder limits that prevent
+    /// scrcpy from starting.
+    ignore_video_encoder_constraints: Option<bool>,
 }
 
 fn resolve_audio_codec_flag<'a>(config: &'a ScrcpyConfig, audio_codec_override: Option<&'a str>) -> Option<&'a str> {
@@ -1281,6 +1286,11 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
             if !trimmed.is_empty() {
                 args.push(format!("--background-color={}", trimmed));
             }
+        }
+
+        // v4.1: ignore video encoder size constraints
+        if let Some(true) = config.ignore_video_encoder_constraints {
+            args.push("--ignore-video-encoder-constraints".to_string());
         }
     }
     

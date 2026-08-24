@@ -179,7 +179,10 @@ languages: {
         backgroundColor: 'Warna BG',
         backgroundColorTooltip: 'Warna hex untuk latar belakang jendela/area letterbox (mis. #1a1a1a). Kosongkan untuk abu-abu gelap bawaan. (scrcpy v4+)',
         backgroundColorNone: 'Bawaan',
-        badgeNew: 'BARU'
+        badgeNew: 'BARU',
+        // v4.1 features
+        ignoreEncoderConstraints: 'Ignore Encoder Constraints',
+        ignoreEncoderConstraintsTooltip: 'Skip video encoder size constraints entirely. Use this if scrcpy fails to start or has resolution issues due to the device reporting incorrect encoder limits (scrcpy v4.1+).',
     },
     sessionBehavior: {
         title: 'Pengaturan Sesi',

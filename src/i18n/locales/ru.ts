@@ -184,7 +184,10 @@ export const ru: Translations = {
     backgroundColor: 'Цвет фона',
     backgroundColorTooltip: 'HEX-цвет фона/полос окна (ex. #1a1a1a). Оставьте пустым для тёмно-серого по умолчанию. (scrcpy v4+)',
     backgroundColorNone: 'По умолчанию',
-    badgeNew: 'НОВОЕ'
+    badgeNew: 'НОВОЕ',
+    // v4.1 features
+    ignoreEncoderConstraints: 'Игнорировать ограничения энкодера',
+    ignoreEncoderConstraintsTooltip: 'Полностью пропустить ограничения размера видеоэнкодера. Используйте, если scrcpy не запускается или возникают проблемы с разрешением из-за некорректных данных об ограничениях, сообщаемых устройством (scrcpy v4.1+).',
   },
 
   sessionBehavior: {

@@ -179,7 +179,10 @@ export const ptBR: Translations = {
         backgroundColor: 'Cor do Fundo',
         backgroundColorTooltip: 'Cor hex para o fundo/letterbox da janela (ex. #1a1a1a). Deixe vazio para cinza escuro padrão. (scrcpy v4+)',
         backgroundColorNone: 'Padrão',
-        badgeNew: 'NOVO'
+        badgeNew: 'NOVO',
+        // v4.1 features
+        ignoreEncoderConstraints: 'Ignore Encoder Constraints',
+        ignoreEncoderConstraintsTooltip: 'Skip video encoder size constraints entirely. Use this if scrcpy fails to start or has resolution issues due to the device reporting incorrect encoder limits (scrcpy v4.1+).',
     },
     sessionBehavior: {
         title: 'Comportamento da Sessão',
