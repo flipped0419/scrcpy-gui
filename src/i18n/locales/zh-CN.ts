@@ -179,7 +179,10 @@ export const zhCN: Translations = {
         backgroundColor: '背景颜色',
         backgroundColorTooltip: '窗口背景/外边区域的十六进制颜色（如 #1a1a1a）。留空则使用默认深灰色。（scrcpy v4+）',
         backgroundColorNone: '默认',
-        badgeNew: '新'
+        badgeNew: '新',
+        // v4.1 features
+        ignoreEncoderConstraints: '忽略编码器限制',
+        ignoreEncoderConstraintsTooltip: '完全跳过视频编码器尺寸限制。如果 scrcpy 因设备报告错误的编码器限制而无法启动或出现分辨率问题，请使用此选项（scrcpy v4.1+）。'
     },
     sessionBehavior: {
         title: '行为设置',

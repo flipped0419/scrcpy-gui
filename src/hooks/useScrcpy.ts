@@ -73,6 +73,10 @@ export interface ScrcpyConfig {
      *  it on the next launch. Defaults to true; some users find a window
      *  that always reopens at scrcpy's default spot less surprising. */
     rememberWindowPosition?: boolean;
+    // v4.1 features
+    /** Ignore video encoder size constraints (--ignore-video-encoder-constraints).
+     *  Useful for devices that report incorrect encoder limits (scrcpy v4.1+). */
+    ignoreVideoEncoderConstraints?: boolean;
     /** Screen position (pixels) to restore via --window-x / --window-y for
      *  this launch. Resolved per-device from windowPositions right before
      *  invoking run_scrcpy; never set directly by the UI. */
@@ -149,7 +153,9 @@ export function useScrcpy() {
         backgroundColor: '',
         keepActive: false,
         vsync: true,
-        rememberWindowPosition: true
+        rememberWindowPosition: true,
+        // v4.1 features
+        ignoreVideoEncoderConstraints: false,
     });
     const [windowPositions, setWindowPositions] = useState<WindowPositions>({});
     const prevDevicesRef = useRef<string[]>([]);

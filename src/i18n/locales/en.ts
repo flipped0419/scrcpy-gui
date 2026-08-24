@@ -180,7 +180,10 @@ export const en = {
         backgroundColor: 'BG Color',
         backgroundColorTooltip: 'Hex color for the window background/letterbox area (e.g. #1a1a1a). Leave blank for default dark gray. (scrcpy v4+)',
         backgroundColorNone: 'Default',
-        badgeNew: 'NEW'
+        badgeNew: 'NEW',
+        // v4.1 features
+        ignoreEncoderConstraints: 'Ignore Encoder Constraints',
+        ignoreEncoderConstraintsTooltip: 'Skip video encoder size constraints entirely. Use this if scrcpy fails to start or has resolution issues due to the device reporting incorrect encoder limits (scrcpy v4.1+).',
     },
     sessionBehavior: {
         title: 'Session Behavior',

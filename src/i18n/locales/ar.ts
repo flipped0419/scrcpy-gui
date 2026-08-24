@@ -182,7 +182,10 @@ export const ar: Translations = {
         backgroundColor: 'لون الخلفية',
         backgroundColorTooltip: 'لون الخلفية بصيغة Hex (مثل ‎#1a1a1a). اتركه فارغًا لاستخدام اللون الرمادي الداكن الافتراضي (Scrcpy v4+).',
         backgroundColorNone: 'الافتراضي',
-        badgeNew: 'جديد'
+        badgeNew: 'جديد',
+        // v4.1 features
+        ignoreEncoderConstraints: 'Ignore Encoder Constraints',
+        ignoreEncoderConstraintsTooltip: 'Skip video encoder size constraints entirely. Use this if scrcpy fails to start or has resolution issues due to the device reporting incorrect encoder limits (scrcpy v4.1+).'
     },
     sessionBehavior: {
         title: 'سلوك الجلسة',
