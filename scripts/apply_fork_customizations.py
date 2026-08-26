@@ -37,15 +37,15 @@ def insert_before_in_section(relative: str, section_marker: str, target: str, in
 
 def insert_after_key(relative: str, key: str, insertion: str) -> None:
     text = read_text(relative)
-    marker = f"        {key}:"
-    pos = text.find(marker)
-    if pos < 0:
-        raise RuntimeError(f"Translation key not found in {relative}: {key}")
-    line_end = text.find("\n", pos)
-    if line_end < 0:
-        raise RuntimeError(f"Could not find line end for {key} in {relative}")
-    line_end += 1
-    write_text(relative, text[:line_end] + insertion + text[line_end:])
+    offset = 0
+    marker = f"{key}:"
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith(marker):
+            pos = offset + len(line)
+            write_text(relative, text[:pos] + insertion + text[pos:])
+            return
+        offset += len(line)
+    raise RuntimeError(f"Translation key not found in {relative}: {key}")
 
 
 # 1) Let the main Tauri window resize and enable WebView zoom hotkeys.
