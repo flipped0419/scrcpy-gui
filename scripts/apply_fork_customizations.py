@@ -35,6 +35,19 @@ def insert_before_in_section(relative: str, section_marker: str, target: str, in
     write_text(relative, text[:target_pos] + insertion + text[target_pos:])
 
 
+def insert_after_key(relative: str, key: str, insertion: str) -> None:
+    text = read_text(relative)
+    marker = f"        {key}:"
+    pos = text.find(marker)
+    if pos < 0:
+        raise RuntimeError(f"Translation key not found in {relative}: {key}")
+    line_end = text.find("\n", pos)
+    if line_end < 0:
+        raise RuntimeError(f"Could not find line end for {key} in {relative}")
+    line_end += 1
+    write_text(relative, text[:line_end] + insertion + text[line_end:])
+
+
 # 1) Let the main Tauri window resize and enable WebView zoom hotkeys.
 tauri_path = ROOT / "src-tauri/tauri.conf.json"
 tauri = json.loads(tauri_path.read_text(encoding="utf-8"))
@@ -112,8 +125,9 @@ insert_before_in_section(
     launch_app_ui,
 )
 
-# 5) Add English fallback plus Simplified Chinese strings. Other locales use
-#    the existing deep-merge fallback to English.
+# 5) Add English + Simplified Chinese strings. The project types every locale
+#    against the full English object, so the remaining locales receive English
+#    fallback strings here as well (the runtime still uses its normal merge logic).
 replace_once(
     "src/i18n/locales/en.ts",
     "        backgroundColorNone: 'Default',\n        badgeNew: 'NEW',",
@@ -124,5 +138,14 @@ replace_once(
     "        backgroundColorNone: '默认',\n        badgeNew: '新',",
     "        backgroundColorNone: '默认',\n        startApp: '启动应用',\n        startAppHint: '在虚拟显示器上直接启动指定 Android 应用。',\n        startAppDescription: '可选。填写应用包名；留空则保持普通虚拟桌面。设置会自动记住。',\n        bbdcPreset: '不背单词',\n        badgeNew: '新',",
 )
+
+fallback_strings = (
+    "        startApp: 'Launch App',\n"
+    "        startAppHint: 'Start an Android app directly on the virtual display.',\n"
+    "        startAppDescription: 'Optional package name. Leave blank for the normal virtual desktop. The value is remembered automatically.',\n"
+    "        bbdcPreset: 'BBDC',\n"
+)
+for locale in ("fr", "pt-BR", "zh-TW", "ru", "id", "ar"):
+    insert_after_key(f"src/i18n/locales/{locale}.ts", "backgroundColorNone", fallback_strings)
 
 print("Fork customizations applied successfully.")
