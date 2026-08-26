@@ -31,11 +31,49 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: pwsh
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build HarmonyOS scrcpy server
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v4.1 https://github.com/Genymobile/scrcpy.git harmony-scrcpy
+
+          $path = "harmony-scrcpy/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java"
+          $content = Get-Content -Raw $path
+          $old = 'createNewVirtualDisplay("scrcpy", displaySize.getWidth(), displaySize.getHeight(), dpi, surface, flags)'
+          $new = 'createNewVirtualDisplay("CastPlusDisplay", displaySize.getWidth(), displaySize.getHeight(), dpi, surface, flags)'
+          $count = ([regex]::Matches($content, [regex]::Escape($old))).Count
+          if ($count -ne 1) { throw "Expected exactly one virtual display patch target, found $count" }
+          Set-Content -Path $path -Value ($content.Replace($old, $new)) -Encoding utf8 -NoNewline
+
+          Push-Location harmony-scrcpy
+          .\gradlew.bat -p server assembleRelease --stacktrace
+          Pop-Location
+
+          New-Item -ItemType Directory -Force src-tauri/resources | Out-Null
+          Copy-Item harmony-scrcpy/server/build/outputs/apk/release/server-release-unsigned.apk src-tauri/resources/scrcpy-server-harmony
+
+          python -c "import zipfile; p='src-tauri/resources/scrcpy-server-harmony'; z=zipfile.ZipFile(p); d=z.read('classes.dex'); assert b'CastPlusDisplay' in d; print('Harmony server verified:', len(d), 'DEX bytes')"
+          Get-FileHash src-tauri/resources/scrcpy-server-harmony -Algorithm SHA256
+
       - name: Apply fork customizations
         run: |
           python scripts/apply_fork_customizations.py
           python scripts/apply_app_picker_improvements.py
           python scripts/apply_app_names_orientation.py
+          python scripts/apply_harmony_desktop.py
 
       - name: Install dependencies
         run: npm ci
@@ -49,13 +87,19 @@ jobs:
       - name: Build Windows bundles
         run: npm run tauri build
 
+      - name: Prepare portable Harmony server
+        shell: pwsh
+        run: |
+          Copy-Item src-tauri/resources/scrcpy-server-harmony src-tauri/target/release/scrcpy-server-harmony
+
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: ScrcpyGUI-Windows-desktop-app-launch
+          name: ScrcpyGUI-Windows-HarmonyOS-PC-Mode
           if-no-files-found: error
           retention-days: 14
           path: |
             src-tauri/target/release/ScrcpyGUI.exe
+            src-tauri/target/release/scrcpy-server-harmony
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
