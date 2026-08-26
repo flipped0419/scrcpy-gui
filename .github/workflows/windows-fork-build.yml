@@ -32,7 +32,9 @@ jobs:
           workspaces: src-tauri -> target
 
       - name: Apply fork customizations
-        run: python scripts/apply_fork_customizations.py
+        run: |
+          python scripts/apply_fork_customizations.py
+          python scripts/apply_app_picker_improvements.py
 
       - name: Install dependencies
         run: npm ci
