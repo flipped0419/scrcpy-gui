@@ -1,0 +1,90 @@
+name: Build Harmony scrcpy server
+
+on:
+  push:
+    branches:
+      - harmony-castplus-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Fetch scrcpy v4.1
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v4.1 https://github.com/Genymobile/scrcpy.git upstream-scrcpy
+          git -C upstream-scrcpy rev-parse HEAD
+
+      - name: Patch virtual display name
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('upstream-scrcpy/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java')
+          s = p.read_text(encoding='utf-8')
+          old = 'createNewVirtualDisplay("scrcpy", displaySize.getWidth(), displaySize.getHeight(), dpi, surface, flags)'
+          new = 'createNewVirtualDisplay("CastPlusDisplay", displaySize.getWidth(), displaySize.getHeight(), dpi, surface, flags)'
+          count = s.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one patch target, found {count}')
+          p.write_text(s.replace(old, new), encoding='utf-8')
+          print('Patched:', p)
+          PY
+          grep -n 'createNewVirtualDisplay' upstream-scrcpy/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
+          grep -n 'CastPlusDisplay' upstream-scrcpy/server/src/main/java/com/genymobile/scrcpy/video/NewDisplayCapture.java
+
+      - name: Build scrcpy server v4.1
+        shell: bash
+        run: |
+          cd upstream-scrcpy
+          chmod +x gradlew
+          ./gradlew -p server assembleRelease --stacktrace
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp upstream-scrcpy/server/build/outputs/apk/release/server-release-unsigned.apk out/scrcpy-server-harmony-v4.1
+          sha256sum out/scrcpy-server-harmony-v4.1 | tee out/SHA256SUMS.txt
+          python3 - <<'PY'
+          import zipfile
+          p='out/scrcpy-server-harmony-v4.1'
+          with zipfile.ZipFile(p) as z:
+              names=z.namelist()
+              print('APK entries:', names)
+              dex=z.read('classes.dex')
+              print('CastPlusDisplay present in classes.dex:', b'CastPlusDisplay' in dex)
+              print('Original literal scrcpy present in classes.dex:', b'scrcpy' in dex)
+              if b'CastPlusDisplay' not in dex:
+                  raise SystemExit('Patched display name not found in classes.dex')
+          PY
+
+      - name: Upload modified server
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrcpy-server-harmony-v4.1
+          path: |
+            out/scrcpy-server-harmony-v4.1
+            out/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
