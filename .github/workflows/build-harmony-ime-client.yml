@@ -1,0 +1,78 @@
+name: Build Harmony IME paste test client
+
+on:
+  push:
+    branches:
+      - harmony-ime-paste-test
+  workflow_dispatch:
+
+jobs:
+  build-win64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+
+      - name: Install Windows cross-build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git python3 gcc g++ make cmake meson ninja-build pkg-config \
+            mingw-w64 mingw-w64-tools libz-mingw-w64-dev \
+            curl wget unzip zip xz-utils bzip2 nasm yasm \
+            autoconf automake libtool libtool-bin
+
+      - name: Fetch scrcpy v4.1
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v4.1 https://github.com/Genymobile/scrcpy.git upstream-scrcpy
+          git -C upstream-scrcpy rev-parse HEAD
+
+      - name: Patch non-ASCII text to clipboard paste
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('upstream-scrcpy/app/src/keyboard_sdk.c')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''    struct sc_control_msg msg;\n    msg.type = SC_CONTROL_MSG_TYPE_INJECT_TEXT;\n    msg.inject_text.text = strdup(event->text);\n    if (!msg.inject_text.text) {\n        LOGW("Could not strdup input text");\n        return;\n    }\n    if (!sc_controller_push_msg(kb->controller, &msg)) {\n        free(msg.inject_text.text);\n        LOGW("Could not request 'inject text'");\n    }\n'''
+
+          new = '''    bool non_ascii = false;\n    for (const unsigned char *p = (const unsigned char *) event->text; *p; ++p) {\n        if (*p >= 0x80) {\n            non_ascii = true;\n            break;\n        }\n    }\n\n    struct sc_control_msg msg;\n    if (non_ascii) {\n        // HarmonyOS desktop mode does not reliably accept non-ASCII through\n        // INJECT_TEXT, while SET_CLIPBOARD with paste=true works correctly.\n        msg.type = SC_CONTROL_MSG_TYPE_SET_CLIPBOARD;\n        msg.set_clipboard.sequence = 0; // SC_SEQUENCE_INVALID\n        msg.set_clipboard.text = strdup(event->text);\n        msg.set_clipboard.paste = true;\n        if (!msg.set_clipboard.text) {\n            LOGW("Could not strdup non-ASCII input text");\n            return;\n        }\n        if (!sc_controller_push_msg(kb->controller, &msg)) {\n            free(msg.set_clipboard.text);\n            LOGW("Could not request non-ASCII clipboard paste");\n        }\n        return;\n    }\n\n    msg.type = SC_CONTROL_MSG_TYPE_INJECT_TEXT;\n    msg.inject_text.text = strdup(event->text);\n    if (!msg.inject_text.text) {\n        LOGW("Could not strdup input text");\n        return;\n    }\n    if (!sc_controller_push_msg(kb->controller, &msg)) {\n        free(msg.inject_text.text);\n        LOGW("Could not request 'inject text'");\n    }\n'''
+
+          count = s.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one keyboard patch target, found {count}')
+
+          p.write_text(s.replace(old, new), encoding='utf-8')
+          print('Patched:', p)
+          PY
+          grep -n -A35 -B8 'non_ascii' upstream-scrcpy/app/src/keyboard_sdk.c
+
+      - name: Build scrcpy v4.1 Windows x64 client
+        shell: bash
+        run: |
+          cd upstream-scrcpy
+          chmod +x release/*.sh app/deps/*.sh
+          release/build_windows.sh 64
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp upstream-scrcpy/release/work/build-win64/dist/scrcpy.exe out/scrcpy-harmony-ime-v4.1.exe
+          sha256sum out/scrcpy-harmony-ime-v4.1.exe | tee out/SHA256SUMS.txt
+          file out/scrcpy-harmony-ime-v4.1.exe
+
+      - name: Upload patched client
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrcpy-harmony-ime-v4.1-win64
+          path: |
+            out/scrcpy-harmony-ime-v4.1.exe
+            out/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
