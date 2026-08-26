@@ -74,6 +74,7 @@ jobs:
           python scripts/apply_app_picker_improvements.py
           python scripts/apply_app_names_orientation.py
           python scripts/apply_harmony_desktop.py
+          python scripts/apply_harmony_latency_fix.py
 
       - name: Install dependencies
         run: npm ci
