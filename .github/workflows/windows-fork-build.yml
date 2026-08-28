@@ -81,6 +81,7 @@ jobs:
           if (Test-Path scripts/apply_light_ui.py) { python scripts/apply_light_ui.py }
           if (Test-Path scripts/apply_light_ui_cleanup.py) { python scripts/apply_light_ui_cleanup.py }
           if (Test-Path scripts/apply_light_ui_fixes.py) { python scripts/apply_light_ui_fixes.py }
+          if (Test-Path scripts/apply_light_ui_dedup.py) { python scripts/apply_light_ui_dedup.py }
 
       - name: Install dependencies
         run: npm ci
