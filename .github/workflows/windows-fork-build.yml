@@ -70,6 +70,7 @@ jobs:
           Get-FileHash src-tauri/resources/scrcpy-server-harmony -Algorithm SHA256
 
       - name: Apply fork customizations
+        shell: pwsh
         run: |
           python scripts/apply_fork_customizations.py
           python scripts/apply_app_picker_improvements.py
@@ -78,7 +79,7 @@ jobs:
           python scripts/apply_harmony_latency_fix.py
           python scripts/apply_harmony_session_behavior.py
           if (Test-Path scripts/apply_light_ui.py) { python scripts/apply_light_ui.py }
-        shell: pwsh
+          if (Test-Path scripts/apply_light_ui_cleanup.py) { python scripts/apply_light_ui_cleanup.py }
 
       - name: Install dependencies
         run: npm ci
