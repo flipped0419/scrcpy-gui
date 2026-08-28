@@ -64,12 +64,12 @@ replace_once(
 # the UI description match their actual Harmony Desktop behaviour.
 replace_once(
     "src/i18n/locales/en.ts",
-    "        stayAwakeTooltip: 'Keep device awake while mirroring.',",
+    "        stayAwakeTooltip: 'Keep the device awake while mirroring is active.',",
     "        stayAwakeTooltip: 'Keep the device awake during screen mirroring or HarmonyOS PC Mode.',",
 )
 replace_once(
     "src/i18n/locales/en.ts",
-    "        screenOffTooltip: 'Turn off device screen while mirroring to save power.',",
+    "        screenOffTooltip: 'Turn off the device screen while mirroring to save battery.',",
     "        screenOffTooltip: 'Turn off the device main screen during screen mirroring or HarmonyOS PC Mode to save power.',",
 )
 replace_once(
