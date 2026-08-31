@@ -31,6 +31,10 @@ Thumbs.db
 scrcpy-bin/
 scrcpy_temp.zip
 scrcpy_temp.tar.gz
+src-tauri/resources/scrcpy-server-harmony
+
+# Local reproducible-build workspace
+.build/
 
 # Env
 .env
