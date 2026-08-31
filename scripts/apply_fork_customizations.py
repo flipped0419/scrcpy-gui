@@ -1,0 +1,306 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def read_text(relative: str) -> str:
+    return (ROOT / relative).read_text(encoding="utf-8")
+
+
+def write_text(relative: str, content: str) -> None:
+    (ROOT / relative).write_text(content, encoding="utf-8")
+
+
+def replace_once(relative: str, old: str, new: str) -> None:
+    text = read_text(relative)
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(
+            f"Expected exactly one match in {relative}, found {count}: {old[:80]!r}"
+        )
+    write_text(relative, text.replace(old, new, 1))
+
+
+def insert_before_in_section(relative: str, section_marker: str, target: str, insertion: str) -> None:
+    text = read_text(relative)
+    section_pos = text.find(section_marker)
+    if section_pos < 0:
+        raise RuntimeError(f"Section marker not found in {relative}: {section_marker!r}")
+    target_pos = text.find(target, section_pos)
+    if target_pos < 0:
+        raise RuntimeError(f"Target not found after section marker in {relative}: {target!r}")
+    write_text(relative, text[:target_pos] + insertion + text[target_pos:])
+
+
+def insert_after_key(relative: str, key: str, insertion: str) -> None:
+    text = read_text(relative)
+    offset = 0
+    marker = f"{key}:"
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith(marker):
+            pos = offset + len(line)
+            write_text(relative, text[:pos] + insertion + text[pos:])
+            return
+        offset += len(line)
+    raise RuntimeError(f"Translation key not found in {relative}: {key}")
+
+
+# 1) Let the main Tauri window resize and enable WebView zoom hotkeys.
+tauri_path = ROOT / "src-tauri/tauri.conf.json"
+tauri = json.loads(tauri_path.read_text(encoding="utf-8"))
+main_window = next(w for w in tauri["app"]["windows"] if w.get("label") == "main")
+main_window["resizable"] = True
+main_window["zoomHotkeysEnabled"] = True
+tauri_path.write_text(json.dumps(tauri, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+# 2) Add an optional startApp field to the frontend config and persist it with the
+#    existing scrcpy_config localStorage mechanism.
+replace_once(
+    "src/hooks/useScrcpy.ts",
+    "    vdDpi?: number;\n    rotation?: string;",
+    "    vdDpi?: number;\n    startApp?: string;\n    rotation?: string;",
+)
+replace_once(
+    "src/hooks/useScrcpy.ts",
+    "        vdDpi: 420,\n        aspectRatioLock: true,",
+    "        vdDpi: 420,\n        startApp: \"\",\n        aspectRatioLock: true,",
+)
+
+# 3) Thread startApp through the Rust config and translate it to scrcpy's
+#    --start-app=<package> whenever Desktop/Virtual Display mode is used.
+replace_once(
+    "src-tauri/src/commands.rs",
+    "    vd_dpi: Option<u32>,\n    rotation: Option<String>,",
+    "    vd_dpi: Option<u32>,\n    start_app: Option<String>,\n    rotation: Option<String>,",
+)
+replace_once(
+    "src-tauri/src/commands.rs",
+    "             args.push(format!(\"--new-display={}x{}/{}\", w, h, dpi));\n             args.push(\"--video-buffer=100\".to_string());\n             // v4: flex display (resize virtual display with window)\n             if let Some(true) = config.flex_display { args.push(\"--flex-display\".to_string()); }",
+    "             args.push(format!(\"--new-display={}x{}/{}\", w, h, dpi));\n             args.push(\"--video-buffer=100\".to_string());\n             if let Some(ref app) = config.start_app {\n                 let app = app.trim();\n                 if !app.is_empty() {\n                     args.push(format!(\"--start-app={}\", app));\n                 }\n             }\n             // v4: flex display (resize virtual display with window)\n             if let Some(true) = config.flex_display { args.push(\"--flex-display\".to_string()); }",
+)
+
+# 4) Add an ADB-backed command that discovers launchable apps. Prefer Android's
+#    launcher-activity query (includes system + user launchers). If a vendor ROM
+#    does not support that cmd-package form, fall back to third-party packages.
+launchable_apps_command = r'''#[tauri::command]
+pub async fn get_launchable_apps(device: String, custom_path: Option<String>) -> serde_json::Value {
+    let adb_path = get_binary_path("adb", custom_path);
+    let mut apps: Vec<String> = Vec::new();
+
+    let launcher_query = create_command(&adb_path)
+        .arg("-s")
+        .arg(&device)
+        .args([
+            "shell",
+            "cmd",
+            "package",
+            "query-activities",
+            "--brief",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            "android.intent.category.LAUNCHER",
+        ])
+        .output()
+        .await;
+
+    if let Ok(output) = launcher_query {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let line = line.trim();
+                if let Some((package, _activity)) = line.split_once('/') {
+                    let package = package.trim();
+                    if !package.is_empty() && package.contains('.') {
+                        apps.push(package.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback for ROMs whose `cmd package query-activities` syntax differs.
+    if apps.is_empty() {
+        if let Ok(output) = create_command(&adb_path)
+            .arg("-s")
+            .arg(&device)
+            .args(["shell", "pm", "list", "packages", "-3"])
+            .output()
+            .await
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    if let Some(package) = line.trim().strip_prefix("package:") {
+                        let package = package.trim();
+                        if !package.is_empty() {
+                            apps.push(package.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    apps.sort_by_key(|value| value.to_ascii_lowercase());
+    apps.dedup();
+    json!({ "success": true, "apps": apps })
+}
+
+'''
+replace_once(
+    "src-tauri/src/commands.rs",
+    "#[tauri::command]\npub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value {",
+    launchable_apps_command + "#[tauri::command]\npub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value {",
+)
+replace_once(
+    "src-tauri/src/lib.rs",
+    "            commands::get_devices,\n            commands::adb_connect,",
+    "            commands::get_devices,\n            commands::get_launchable_apps,\n            commands::adb_connect,",
+)
+
+# 5) Teach the Desktop panel to query that list automatically and on demand.
+replace_once(
+    "src/components/ControlPanel/ControlPanel.tsx",
+    "import { useState, useEffect, useRef } from 'react';\n",
+    "import { useState, useEffect, useRef } from 'react';\nimport { invoke } from '@tauri-apps/api/core';\n",
+)
+replace_once(
+    "src/components/ControlPanel/ControlPanel.tsx",
+    "    const { t } = useI18n();\n\n    const handleChange = (field: keyof ScrcpyConfig, value: any) => {",
+    '''    const { t } = useI18n();
+    const [installedApps, setInstalledApps] = useState<string[]>([]);
+    const [appsLoading, setAppsLoading] = useState(false);
+
+    const refreshInstalledApps = async () => {
+        if (!config.device) {
+            setInstalledApps([]);
+            return;
+        }
+        setAppsLoading(true);
+        try {
+            const result: any = await invoke('get_launchable_apps', {
+                device: config.device,
+                customPath: config.scrcpyPath,
+            });
+            if (result?.success && Array.isArray(result.apps)) {
+                setInstalledApps(result.apps);
+            } else {
+                setInstalledApps([]);
+            }
+        } catch (error) {
+            console.error('Failed to read installed apps:', error);
+            setInstalledApps([]);
+        } finally {
+            setAppsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (config.sessionMode === 'desktop' && config.device) {
+            void refreshInstalledApps();
+        } else if (config.sessionMode !== 'desktop') {
+            setInstalledApps([]);
+        }
+    }, [config.device, config.sessionMode, config.scrcpyPath]);
+
+    const handleChange = (field: keyof ScrcpyConfig, value: any) => {''',
+)
+
+# 6) Add a compact Launch App card to the existing Desktop mode. It now has a
+#    live device app selector, while keeping the manual package field and BBDC
+#    shortcut for fast testing / packages that are not exposed by the launcher.
+launch_app_ui = '''                            <div className="p-3 rounded-xl border border-zinc-800 bg-zinc-950/30 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">{t('controlPanel.startApp')}</label>
+                                        <Tooltip text={t('controlPanel.startAppHint')} placement="top" />
+                                    </div>
+                                    <button
+                                        onClick={() => handleChange('startApp', 'cn.com.langeasy.LangEasyLexis')}
+                                        className="text-[8px] font-black uppercase text-primary hover:text-white transition-colors"
+                                    >
+                                        {t('controlPanel.bbdcPreset')}
+                                    </button>
+                                </div>
+                                <div className="flex items-end gap-2">
+                                    <CustomSelect
+                                        className="flex-1 min-w-0"
+                                        label={t('controlPanel.installedApps')}
+                                        value={config.startApp || ""}
+                                        onChange={(val) => handleChange('startApp', val)}
+                                        options={[
+                                            { value: "", label: t('controlPanel.appListNone') },
+                                            ...installedApps.map(pkg => ({
+                                                value: pkg,
+                                                label: pkg === 'cn.com.langeasy.LangEasyLexis'
+                                                    ? `${t('controlPanel.bbdcPreset')} · ${pkg}`
+                                                    : pkg
+                                            }))
+                                        ]}
+                                    />
+                                    <button
+                                        onClick={() => void refreshInstalledApps()}
+                                        disabled={appsLoading || !config.device}
+                                        className="h-[30px] px-2 rounded-md border border-zinc-800 bg-zinc-950 text-[8px] font-black uppercase text-primary hover:border-primary/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        {appsLoading ? '...' : t('common.refresh')}
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="com.example.app"
+                                        value={config.startApp || ''}
+                                        onChange={(e) => handleChange('startApp', e.target.value)}
+                                        className="flex-1 bg-zinc-950 border border-zinc-800 rounded-md px-2 py-1.5 text-[11px] text-zinc-300 focus:border-primary/60 focus:outline-none transition-colors font-mono"
+                                    />
+                                    {config.startApp && (
+                                        <button
+                                            onClick={() => handleChange('startApp', '')}
+                                            className="text-[8px] font-black text-zinc-600 hover:text-red-400 uppercase transition-colors"
+                                        >
+                                            {t('common.clear')}
+                                        </button>
+                                    )}
+                                </div>
+                                <p className="text-[8px] text-zinc-600 leading-relaxed">{t('controlPanel.startAppDescription')}</p>
+                            </div>
+
+'''
+insert_before_in_section(
+    "src/components/ControlPanel/ControlPanel.tsx",
+    "                    {/* Desktop Config */}",
+    "                            <div className=\"space-y-2.5 pt-0.5\">",
+    launch_app_ui,
+)
+
+# 7) Add English + Simplified Chinese strings. The project types every locale
+#    against the full English object, so the remaining locales receive English
+#    fallback strings here as well (the runtime still uses its normal merge logic).
+replace_once(
+    "src/i18n/locales/en.ts",
+    "        backgroundColorNone: 'Default',\n        badgeNew: 'NEW',",
+    "        backgroundColorNone: 'Default',\n        startApp: 'Launch App',\n        startAppHint: 'Start an Android app directly on the virtual display.',\n        startAppDescription: 'Choose a launchable app from the connected device or enter a package name manually. Leave blank for the normal virtual desktop.',\n        installedApps: 'Installed Apps',\n        appListNone: 'No app / virtual desktop',\n        bbdcPreset: 'BBDC',\n        badgeNew: 'NEW',",
+)
+replace_once(
+    "src/i18n/locales/zh-CN.ts",
+    "        backgroundColorNone: '默认',\n        badgeNew: '新',",
+    "        backgroundColorNone: '默认',\n        startApp: '启动应用',\n        startAppHint: '在虚拟显示器上直接启动指定 Android 应用。',\n        startAppDescription: '可从已连接设备读取可启动应用，也可以手动填写包名；留空则保持普通虚拟桌面。',\n        installedApps: '已安装应用',\n        appListNone: '不启动应用 / 虚拟桌面',\n        bbdcPreset: '不背单词',\n        badgeNew: '新',",
+)
+
+fallback_strings = (
+    "        startApp: 'Launch App',\n"
+    "        startAppHint: 'Start an Android app directly on the virtual display.',\n"
+    "        startAppDescription: 'Choose a launchable app from the connected device or enter a package name manually. Leave blank for the normal virtual desktop.',\n"
+    "        installedApps: 'Installed Apps',\n"
+    "        appListNone: 'No app / virtual desktop',\n"
+    "        bbdcPreset: 'BBDC',\n"
+)
+for locale in ("fr", "pt-BR", "zh-TW", "ru", "id", "ar"):
+    insert_after_key(f"src/i18n/locales/{locale}.ts", "backgroundColorNone", fallback_strings)
+
+print("Fork customizations applied successfully.")

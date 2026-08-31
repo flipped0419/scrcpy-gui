@@ -1,111 +1,159 @@
 <p align="center">
   <img src="icon.png" width="128" height="128" alt="ScrcpyGUI Icon">
   <br>
-  <h1>ScrcpyGUI v4</h1>
-  <strong>A premium, high-performance Android control experience.</strong>
+  <h1>ScrcpyGUI v4 — HarmonyOS PC Mode fork</h1>
+  <strong>ScrcpyGUI with a native Huawei / HarmonyOS desktop-mode bridge.</strong>
 </p>
 
 <p align="center">
   <img width="850" alt="ScrcpyGUI Interface" src="https://github.com/user-attachments/assets/a416fcd3-295a-4a01-8769-6f9da429b028" />
 </p>
 
+> **Fork notice**
+> This repository is a fork of [kil0bit-kb/scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui). The upstream project provides the ScrcpyGUI v4 application; this fork adds HarmonyOS PC Mode support and several virtual-display workflow improvements.
 
----
+ScrcpyGUI v4 is a modern GUI for [scrcpy](https://github.com/Genymobile/scrcpy), built with **Tauri v2**, **React 19**, and **Rust**.
 
-ScrcpyGUI v4 is a modern, feature-rich GUI for [scrcpy](https://github.com/Genymobile/scrcpy), completely rebuilt from the ground up using **Tauri v2**, **React 19**, and **Rust**. It transforms your Android device into a professional tool for gaming, development, and content creation.
+## What this fork adds
 
-## 🚀 Key Features
+- **HarmonyOS PC Mode (experimental)**
+  - Creates a dedicated `CastPlusDisplay` virtual display so supported Huawei / HarmonyOS devices can enter the vendor's native PC desktop mode.
+  - Uses a separate `scrcpy-server-harmony` while keeping the normal `scrcpy-server` untouched.
+  - Reuses the existing Desktop Mode controls for resolution, DPI, bitrate, FPS, codec, audio, renderer, recording, and window options.
+  - Defaults to a practical `1920x1080 / 240 DPI` profile when switching from the stock 420 DPI desktop default.
+  - Uses UHID keyboard and mouse input, with **Right Ctrl** as the mouse-capture release shortcut.
+  - Removes the normal Desktop Mode `--video-buffer=100` delay for the HarmonyOS path to preserve scrcpy's low-latency behavior.
+- **Desktop app launch**
+  - Optional package launch on ordinary virtual displays.
+  - App picker and app-name improvements.
+  - Orientation-aware virtual display launch behavior.
+- **Upstream-friendly customization layer**
+  - Fork changes are applied by scripts during CI so the upstream source remains easier to sync and compare.
 
-- **✨ Best Looking GUI**: A stunning, modern interface with smooth animations and a premium look and feel.
-- **🎨 Custom Theme Engine**: 5 premium, hand-crafted themes including **Ultraviolet**, **Astro**, **Carbon**, **Emerald**, and **Bloodmoon** to match your workspace setup.
-- **🔄 Automated Binary Updates**: Deep-integrated system that automatically checks if your local `scrcpy` binary is outdated compared to Genymobile's latest official release, prompting you with a beautiful one-click update modal.
-- **🎮 Precision Input (OTG)**:
-  - **HID Keyboard**: Native hardware simulation for international layouts and special characters.
-  - **HID Mouse**: Zero-lag, high-precision cursor control for a "native desktop" feel.
-- **🖥️ Graphics Renderer Selection**:
-  - Choose a renderer backend such as Direct3D, OpenGL, OpenGL ES, Metal, or Software (capability-aware, OS-filtered).
-- **🌐 Seamless Connectivity**:
-  - **Wireless Pairing**: Native UI for Android 11+ wireless pairings.
-  - **Connection History**: Remember and reconnect to wireless devices with one click.
-- **📹 Pro Camera Mode (Webcam)**:
-  - **Refresh Lenses**: Click to automatically scan and list all physical camera sensors, resolutions, and zoom ranges.
-  - **Torch & Zoom**: Toggle your device's flashlight or adjust zoom level (1.0x - 5.0x) natively.
-  - **Failsafe Camera-Size**: Automatically maps resolutions and defaults to safe 1080p dimensions, preventing hardware encoder crashes on high-megapixel devices.
-- **🖥️ Desktop Mode (Virtual Display)**:
-  - **Flex Display**: Drag and resize your virtual desktop window dynamically on the fly!
-  - **Background Colors**: Customize scrcpy's border and letterbox color with hex values and a live color swatch.
-  - **Keep Active**: Periodic user activity simulator preventing device sleep without changing global settings.
-- **📁 Fluid File Management**:
-  - Drag & drop APK installation or file pushing directly to `/sdcard/Download/`.
-- **🖼️ Premium UX**:
-  - **Splash Screen**: Zero-flicker, themed startup experience.
-  - **Smart Folder Picker**: Automatically falls back to local `scrcpy-bin` or application executable directories when browsing folders.
+## HarmonyOS PC Mode
 
----
+### How it works
 
-## 📖 Getting Started
+Ordinary scrcpy virtual displays are created with the name `scrcpy`. On compatible Huawei / HarmonyOS software, the vendor PC projection framework recognizes a display named `CastPlusDisplay` and can initialize its native PC desktop stack.
 
-To learn how to enable **USB Debugging**, set up **Wireless Pairing**, or install requirements, please read our comprehensive guide:
+This fork therefore keeps two server implementations:
 
-### 👉 **[View the Complete User Guide (GUIDE.md)](GUIDE.md)**
+```text
+scrcpy-server          -> normal scrcpy behavior
+scrcpy-server-harmony  -> virtual display name changed to CastPlusDisplay
+```
 
----
+The Harmony server is built reproducibly from **scrcpy v4.1** in CI. The only scrcpy server source modification is the virtual-display name used by `NewDisplayCapture`.
 
-## 🛠️ Development
+For implementation details, compatibility notes, and troubleshooting, see **[docs/HARMONYOS_PC_MODE.md](docs/HARMONYOS_PC_MODE.md)**.
+
+### Quick start
+
+1. Enable **Developer options** and **USB debugging** on the phone.
+2. Connect the phone over USB and select it in ScrcpyGUI.
+3. Set **Capture Source** to **Desktop**.
+4. Enable **HarmonyOS PC Mode**.
+5. A good starting profile is:
+   - Resolution: `1920 x 1080`
+   - DPI: `240`
+   - FPS: `60`
+   - Bitrate: use the same value you normally use with scrcpy
+6. Start the session. On devices that remember the previous projection mode, subsequent sessions may return directly to PC Mode.
+7. Press **Right Ctrl** to release or recapture the UHID mouse.
+
+### Known limitations
+
+- Compatibility is vendor- and firmware-specific. It has been verified on a HarmonyOS 4.2 device, but other Huawei / HONOR models and firmware versions may behave differently.
+- **Flex Display** is disabled in HarmonyOS PC Mode because dynamically resizing the virtual display can interfere with the vendor desktop stack.
+- **Start App** is disabled in HarmonyOS PC Mode; the vendor PC launcher owns desktop initialization.
+- With UHID keyboard input, some Huawei input-method builds may process Chinese composition while keeping the candidate UI hidden. Clipboard paste remains a reliable Unicode fallback.
+- UHID pointer speed is controlled by the Android/HarmonyOS system. This fork does not change the device-global `pointer_speed` setting automatically.
+
+## Core ScrcpyGUI features
+
+This fork retains the upstream ScrcpyGUI feature set, including:
+
+- scrcpy binary management and updates
+- USB and wireless ADB connectivity
+- camera / webcam mode
+- HID keyboard and mouse support
+- renderer selection
+- recording and audio controls
+- file and APK drag-and-drop
+- themes and window customization
+- standard Desktop Mode with Flex Display
+
+See **[GUIDE.md](GUIDE.md)** for the general ScrcpyGUI user guide.
+
+## Windows builds
+
+The HarmonyOS integration currently has a dedicated Windows CI workflow:
+
+**[Windows HarmonyOS build workflow](../../actions/workflows/windows-fork-build.yml)**
+
+The workflow builds:
+
+- `ScrcpyGUI.exe`
+- NSIS installer
+- MSI installer
+- `scrcpy-server-harmony`
+
+Until a tagged fork release is published, use the workflow artifact from a successful run.
+
+## Development
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+)
-- [Rust](https://rust-lang.org/) & Cargo
-- [Tauri v2 Prerequisites](https://v2.tauri.app/start/prerequisites/)
 
-### Build Instructions
-1. `npm install`
-2. `npm run tauri dev` (Development)
-3. `npm run tauri build` (Production)
+- Node.js 20+
+- Rust and Cargo
+- Tauri v2 prerequisites
+- Java 17
+- Android SDK platform / build tools 36
+- Python 3
+- Git
 
-## ❄️ NixOS Installation (flakes)
+### Build the HarmonyOS server
 
-To install it permanently with a desktop launcher, add the flake to your system's `flake.nix`:
-
-```nix
-inputs.scrcpy-gui.url = "github:kil0bit-kb/scrcpy-gui";
+```powershell
+pwsh ./scripts/build_harmony_server.ps1
 ```
 
-Then add it to your system packages:
+This creates:
 
-```nix
-environment.systemPackages = [
-  inputs.scrcpy-gui.packages.${pkgs.system}.default
-];
+```text
+src-tauri/resources/scrcpy-server-harmony
 ```
----
 
-## 💖 Support the Project
+### Apply fork customizations
 
-If ScrcpyGUI helps you in your daily workflow, consider supporting its development on Patreon. Your support keeps the project alive and independent!
+```powershell
+python scripts/apply_fork_customizations.py
+python scripts/apply_app_picker_improvements.py
+python scripts/apply_app_names_orientation.py
+python scripts/apply_harmony_desktop.py
+python scripts/apply_harmony_latency_fix.py
+python scripts/apply_harmony_session_behavior.py
+```
 
-<p align="left">
-  <a href="https://www.patreon.com/cw/KB_kilObit">
-    <img src="https://img.shields.io/badge/Patreon-Support_KB-F96854?style=for-the-badge&logo=patreon" alt="Support on Patreon">
-  </a>
-</p>
+Then build normally:
 
----
+```powershell
+npm ci
+npm run lint
+npm test
+npm run tauri build
+```
 
-## � Acknowledgments
+## Licensing and attribution
 
-ScrcpyGUI is made possible by the following amazing open-source projects:
+- ScrcpyGUI source in this repository remains under the **MIT License**; see [LICENSE](LICENSE).
+- `scrcpy-server-harmony` is a modified build of [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy) v4.1 and is distributed under the **Apache License 2.0**.
+- See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/scrcpy-APACHE-2.0.txt](licenses/scrcpy-APACHE-2.0.txt).
 
-- **[scrcpy](https://github.com/Genymobile/scrcpy)**: The ultra-fast core engine.
-- **[Tauri](https://tauri.app/)**: The secure, lightweight framework for the desktop app.
-- **[Lucide Icons](https://lucide.dev/)**: For the clean and consistent iconography.
-- **[React](https://react.dev/)**: Powering the modern, interactive interface.
+Thanks to:
 
----
+- [kil0bit-kb/scrcpy-gui](https://github.com/kil0bit-kb/scrcpy-gui) — upstream GUI project
+- [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy) — core Android display/control engine
+- [Tauri](https://tauri.app/), [React](https://react.dev/), and [Lucide](https://lucide.dev/)
 
-## �📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-*ScrcpyGUI is an independent project and is not affiliated with Genymobile or scrcpy authors.*
-
+This fork is independent and is not affiliated with Huawei, HONOR, Genymobile, or the upstream ScrcpyGUI authors.
