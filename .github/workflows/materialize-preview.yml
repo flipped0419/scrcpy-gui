@@ -1,4 +1,4 @@
-name: Materialize Harmony Preview
+name: Materialize Harmony Preview Source
 
 on:
   push:
@@ -9,11 +9,8 @@ on:
 permissions:
   contents: write
 
-env:
-  PREVIEW_TAG: v4.1.0-harmony.1
-
 jobs:
-  prepare-build-release:
+  materialize:
     runs-on: windows-latest
 
     steps:
@@ -72,7 +69,7 @@ jobs:
           Copy-Item "$env:RUNNER_TEMP\harmony-scrcpy\server\build\outputs\apk\release\server-release-unsigned.apk" src-tauri/resources/scrcpy-server-harmony
           python -c "import zipfile; p='src-tauri/resources/scrcpy-server-harmony'; z=zipfile.ZipFile(p); d=z.read('classes.dex'); assert b'CastPlusDisplay' in d; print('Harmony server verified:', len(d), 'DEX bytes')"
 
-      - name: Apply experimental customizations once
+      - name: Apply customizations once
         shell: pwsh
         run: |
           python scripts/apply_fork_customizations.py
@@ -86,7 +83,7 @@ jobs:
           python scripts/apply_light_ui_fixes.py
           python scripts/apply_light_ui_dedup.py
 
-      - name: Materialize final source tree
+      - name: Organize materialized source
         shell: bash
         run: |
           set -euo pipefail
@@ -116,95 +113,11 @@ jobs:
           New-Item -ItemType Directory -Force $outDir | Out-Null
           $out = Join-Path $outDir "scrcpy-server-harmony"
           Copy-Item (Join-Path $work "server/build/outputs/apk/release/server-release-unsigned.apk") $out -Force
-
           python -c "import zipfile; p=r'$out'; z=zipfile.ZipFile(p); d=z.read('classes.dex'); assert b'CastPlusDisplay' in d; print('Harmony server verified:', len(d), 'DEX bytes')"
           Get-FileHash $out -Algorithm SHA256
           PS1
 
-          cat > .github/workflows/windows-fork-build.yml <<'YAML'
-          name: Windows Build
-
-          on:
-            workflow_dispatch:
-            push:
-              branches:
-                - main
-                - release/harmony-preview
-            pull_request:
-
-          permissions:
-            contents: read
-
-          jobs:
-            build-windows:
-              runs-on: windows-latest
-
-              steps:
-                - name: Checkout
-                  uses: actions/checkout@v4
-
-                - name: Setup Node
-                  uses: actions/setup-node@v4
-                  with:
-                    node-version: 20
-                    cache: npm
-
-                - name: Install Rust
-                  uses: dtolnay/rust-toolchain@stable
-
-                - name: Rust cache
-                  uses: swatinem/rust-cache@v2
-                  with:
-                    workspaces: src-tauri -> target
-
-                - name: Setup Java 17
-                  uses: actions/setup-java@v4
-                  with:
-                    distribution: temurin
-                    java-version: '17'
-
-                - name: Install Android SDK 36
-                  shell: pwsh
-                  run: |
-                    $sdkRoot = $env:ANDROID_HOME
-                    if (-not $sdkRoot) { $sdkRoot = "C:\\Android\\android-sdk" }
-                    $sdkmanager = Get-ChildItem (Join-Path $sdkRoot "cmdline-tools") -Recurse -Filter sdkmanager.bat | Select-Object -First 1
-                    if (-not $sdkmanager) { throw "sdkmanager.bat not found under $sdkRoot" }
-                    & $sdkmanager.FullName "platforms;android-36" "build-tools;36.0.0"
-
-                - name: Build HarmonyOS scrcpy server
-                  shell: pwsh
-                  run: .\scripts\build_harmony_server.ps1
-
-                - name: Install dependencies
-                  run: npm ci
-
-                - name: TypeScript check
-                  run: npm run lint
-
-                - name: Frontend tests
-                  run: npm test
-
-                - name: Build Windows bundles
-                  run: npm run tauri build
-
-                - name: Prepare portable Harmony server
-                  shell: pwsh
-                  run: Copy-Item src-tauri/resources/scrcpy-server-harmony src-tauri/target/release/scrcpy-server-harmony
-
-                - name: Upload Windows build
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: ScrcpyGUI-Windows-HarmonyOS
-                    if-no-files-found: error
-                    retention-days: 14
-                    path: |
-                      src-tauri/target/release/ScrcpyGUI.exe
-                      src-tauri/target/release/scrcpy-server-harmony
-                      src-tauri/target/release/bundle/nsis/*.exe
-                      src-tauri/target/release/bundle/msi/*.msi
-          YAML
-
+          if ! grep -q "## HarmonyOS PC Mode preview" README.md; then
           cat >> README.md <<'MD'
 
           ---
@@ -213,48 +126,40 @@ jobs:
 
           This fork includes an experimental HarmonyOS/Huawei PC Mode path based on a modified scrcpy v4.1 server.
 
-          Key differences from ordinary scrcpy virtual display mode:
+          - The Harmony virtual display is named `CastPlusDisplay`, which lets tested Huawei/HarmonyOS devices hand the display to the native PC projection framework.
+          - Harmony mode uses UHID keyboard and mouse input, with a configurable scrcpy shortcut modifier for releasing mouse capture.
+          - Resolution, DPI, FPS, bitrate, codec, audio, recording, fullscreen, always-on-top and screen-off settings are shared with normal sessions.
+          - Harmony mode intentionally does not use the ordinary virtual-desktop 100 ms video buffer.
+          - Normal sessions use the stock `scrcpy-server`; Harmony mode uses `scrcpy-server-harmony`.
 
-          - the virtual display is named `CastPlusDisplay`, allowing tested Huawei/HarmonyOS devices to hand the display to the native PC projection framework;
-          - Harmony mode uses UHID keyboard and mouse input;
-          - the scrcpy shortcut modifier used to release mouse capture is configurable;
-          - Harmony mode reuses normal resolution, DPI, FPS, bitrate, codec, audio, recording, fullscreen and screen-off settings;
-          - the extra 100 ms video buffer used by the ordinary virtual-desktop mode is intentionally disabled for Harmony mode;
-          - ordinary scrcpy sessions continue to use the stock `scrcpy-server`; Harmony mode uses `scrcpy-server-harmony`.
+          The modified server binary is not stored in git. Run `scripts/build_harmony_server.ps1` or use CI to build it reproducibly from official scrcpy v4.1 source.
 
-          The modified server is **not committed as a binary**. Run `scripts/build_harmony_server.ps1` (or use the Windows CI workflow) to build it reproducibly from the official scrcpy v4.1 source.
-
-          ### Tested scope
-
-          The HarmonyOS-specific behavior is based on testing with a Huawei/Honor device running HarmonyOS 4.2. It relies on internal platform behavior and may differ across EMUI/HarmonyOS versions and devices. This is not an official Huawei/Honor integration.
+          Tested with a Huawei/Honor device on HarmonyOS 4.2. This relies on internal platform behavior and may vary by firmware/device. It is not an official Huawei/Honor integration.
           MD
+          fi
 
           cat > CHANGELOG.md <<'MD'
           # Changelog
 
           ## v4.1.0-harmony.1 — Preview
 
-          - Added experimental native HarmonyOS PC Mode through `CastPlusDisplay`.
-          - Added separate stock and Harmony scrcpy-server selection.
-          - Added UHID keyboard/mouse defaults for Harmony mode.
-          - Added configurable scrcpy shortcut modifier for releasing UHID mouse capture.
-          - Reused normal session behavior settings including screen-off, audio, recording, fullscreen and always-on-top.
-          - Removed the ordinary virtual-desktop 100 ms video buffer from Harmony mode.
-          - Added the lightweight Windows-style UI and deduplicated the advanced settings section.
-          - Fixed main-content mouse-wheel/trackpad scrolling.
-          - Materialized previously generated customizations into the repository source tree.
+          - Experimental native HarmonyOS PC Mode through `CastPlusDisplay`.
+          - Separate stock and Harmony scrcpy-server selection.
+          - UHID keyboard/mouse defaults for Harmony mode.
+          - Configurable scrcpy shortcut modifier for releasing UHID mouse capture.
+          - Shared screen-off, audio, recording, fullscreen and other session behavior settings.
+          - Low-latency Harmony rendering without the ordinary 100 ms virtual-desktop buffer.
+          - Lightweight Windows-style UI.
+          - Deduplicated advanced settings.
+          - Fixed mouse-wheel/trackpad scrolling.
+          - Materialized the previously generated customizations into normal repository source files.
           MD
 
-          printf '\n# Built during CI; do not commit the generated Harmony server\nsrc-tauri/resources/scrcpy-server-harmony\n' >> .gitignore
+          if ! grep -q "src-tauri/resources/scrcpy-server-harmony" .gitignore; then
+            printf '\n# Built locally or in CI; do not commit generated Harmony server\nsrc-tauri/resources/scrcpy-server-harmony\n' >> .gitignore
+          fi
 
           rm -f scripts/apply_*.py
-          rm -f .github/workflows/materialize-preview.yml
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore: materialize HarmonyOS preview source [skip ci]"
-          git push origin HEAD:release/harmony-preview
 
       - name: Install dependencies
         run: npm ci
@@ -268,66 +173,27 @@ jobs:
       - name: Build Windows bundles
         run: npm run tauri build
 
-      - name: Prepare release files
-        shell: pwsh
+      - name: Commit materialized source
+        shell: bash
         run: |
-          Copy-Item src-tauri/resources/scrcpy-server-harmony src-tauri/target/release/scrcpy-server-harmony
-          $portable = "ScrcpyGUI-$env:PREVIEW_TAG-portable.zip"
-          Compress-Archive -Force -Path src-tauri/target/release/ScrcpyGUI.exe,src-tauri/target/release/scrcpy-server-harmony -DestinationPath $portable
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A src src-tauri scripts README.md CHANGELOG.md .gitignore
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: materialize HarmonyOS preview source [skip ci]"
+          git push origin HEAD:release/harmony-preview
 
-          $files = @($portable)
-          $files += Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | ForEach-Object FullName
-          $files += Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | ForEach-Object FullName
-
-          $lines = foreach ($f in $files) {
-            $h = Get-FileHash $f -Algorithm SHA256
-            "$($h.Hash.ToLower())  $([IO.Path]::GetFileName($f))"
-          }
-          $lines | Set-Content -Encoding ascii SHA256SUMS.txt
-
-      - name: Create prerelease
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          @"
-          ## ScrcpyGUI HarmonyOS PC Mode Preview
-
-          This is the first organized preview build after materializing the previously CI-generated customizations into the repository source tree.
-
-          Highlights:
-          - HarmonyOS/Huawei native PC Mode through CastPlusDisplay
-          - separate stock and Harmony scrcpy-server paths
-          - low-latency Harmony rendering
-          - UHID mouse and keyboard
-          - configurable mouse-release shortcut modifier
-          - shared screen-off, audio, recording, fullscreen and other session options
-          - lightweight Windows-style UI
-          - deduplicated advanced settings
-          - fixed mouse-wheel / trackpad scrolling
-
-          Tested on a Huawei/Honor HarmonyOS 4.2 device. Harmony-specific behavior is experimental and may vary by firmware/device.
-
-          The installer can download ordinary scrcpy as usual. The Harmony server is bundled as an application resource.
-          "@ | Set-Content -Encoding utf8 RELEASE_NOTES.md
-
-          $assets = @(
-            "ScrcpyGUI-$env:PREVIEW_TAG-portable.zip",
-            "SHA256SUMS.txt"
-          )
-          $assets += Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | ForEach-Object FullName
-          $assets += Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | ForEach-Object FullName
-
-          gh release create "$env:PREVIEW_TAG" @assets --target release/harmony-preview --title "ScrcpyGUI $env:PREVIEW_TAG" --notes-file RELEASE_NOTES.md --prerelease
-
-      - name: Upload preview artifact
+      - name: Upload verification build
         uses: actions/upload-artifact@v4
         with:
-          name: ScrcpyGUI-${{ env.PREVIEW_TAG }}
+          name: ScrcpyGUI-materialized-source-verification
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
           path: |
-            ScrcpyGUI-${{ env.PREVIEW_TAG }}-portable.zip
-            SHA256SUMS.txt
+            src-tauri/target/release/ScrcpyGUI.exe
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
