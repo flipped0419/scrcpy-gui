@@ -72,8 +72,13 @@ jobs:
         run: |
           Copy-Item src-tauri/resources/scrcpy-server-harmony src-tauri/target/release/scrcpy-server-harmony
 
+          $portableDir = "portable"
+          New-Item -ItemType Directory -Force $portableDir | Out-Null
+          Copy-Item src-tauri/target/release/scrcpy-gui-v3.exe "$portableDir/ScrcpyGUI.exe"
+          Copy-Item src-tauri/target/release/scrcpy-server-harmony "$portableDir/scrcpy-server-harmony"
+
           $portable = "ScrcpyGUI-$env:PREVIEW_TAG-portable.zip"
-          Compress-Archive -Force -Path src-tauri/target/release/ScrcpyGUI.exe,src-tauri/target/release/scrcpy-server-harmony -DestinationPath $portable
+          Compress-Archive -Force -Path "$portableDir/*" -DestinationPath $portable
 
           $files = @($portable)
           $files += Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | ForEach-Object FullName
@@ -94,7 +99,7 @@ jobs:
           path: |
             ScrcpyGUI-${{ env.PREVIEW_TAG }}-portable.zip
             SHA256SUMS.txt
-            src-tauri/target/release/ScrcpyGUI.exe
+            src-tauri/target/release/scrcpy-gui-v3.exe
             src-tauri/target/release/scrcpy-server-harmony
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
