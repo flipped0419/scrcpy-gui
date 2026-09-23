@@ -41,7 +41,18 @@ jobs:
       - name: Install Android SDK 36
         shell: pwsh
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          $sdkRoot = $env:ANDROID_HOME
+          if (-not $sdkRoot) { $sdkRoot = $env:ANDROID_SDK_ROOT }
+          if (-not $sdkRoot) { $sdkRoot = "C:\Android\android-sdk" }
+
+          $sdkManager = Get-ChildItem -Path (Join-Path $sdkRoot "cmdline-tools") -Filter "sdkmanager.bat" -Recurse -ErrorAction Stop |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $sdkManager) { throw "sdkmanager.bat not found under $sdkRoot" }
+
+          1..20 | ForEach-Object { "y" } | & $sdkManager --licenses | Out-Null
+          & $sdkManager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build HarmonyOS scrcpy server
         shell: pwsh
