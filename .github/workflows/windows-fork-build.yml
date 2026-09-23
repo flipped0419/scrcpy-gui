@@ -118,11 +118,15 @@ jobs:
           Known limitation: Huawei IME candidate UI may remain hidden with UHID keyboard input. See docs/HARMONYOS_PC_MODE.md for details.
           "@
 
-          $assets = @(
-            "src-tauri/target/release/ScrcpyGUI.exe",
-            "src-tauri/target/release/scrcpy-server-harmony"
-          )
-          $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" | ForEach-Object { $_.FullName }
-          $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" | ForEach-Object { $_.FullName }
+          $assets = @()
+          $portable = "src-tauri/target/release/ScrcpyGUI.exe"
+          $server = "src-tauri/target/release/scrcpy-server-harmony"
+
+          if (Test-Path $portable) { $assets += (Resolve-Path $portable).Path }
+          if (Test-Path $server) { $assets += (Resolve-Path $server).Path }
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+
+          if ($assets.Count -eq 0) { throw "No release assets found" }
 
           gh release create $tag $assets --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title $title --notes $notes --prerelease
