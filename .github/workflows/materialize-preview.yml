@@ -42,12 +42,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK 36
         shell: pwsh
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: |
+          $sdkRoot = $env:ANDROID_HOME
+          if (-not $sdkRoot) { $sdkRoot = "C:\\Android\\android-sdk" }
+          $sdkmanager = Get-ChildItem (Join-Path $sdkRoot "cmdline-tools") -Recurse -Filter sdkmanager.bat | Select-Object -First 1
+          if (-not $sdkmanager) { throw "sdkmanager.bat not found under $sdkRoot" }
+          & $sdkmanager.FullName "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build HarmonyOS scrcpy server
         shell: pwsh
@@ -161,12 +163,14 @@ jobs:
                     distribution: temurin
                     java-version: '17'
 
-                - name: Setup Android SDK
-                  uses: android-actions/setup-android@v3
-
                 - name: Install Android SDK 36
                   shell: pwsh
-                  run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+                  run: |
+                    $sdkRoot = $env:ANDROID_HOME
+                    if (-not $sdkRoot) { $sdkRoot = "C:\\Android\\android-sdk" }
+                    $sdkmanager = Get-ChildItem (Join-Path $sdkRoot "cmdline-tools") -Recurse -Filter sdkmanager.bat | Select-Object -First 1
+                    if (-not $sdkmanager) { throw "sdkmanager.bat not found under $sdkRoot" }
+                    & $sdkmanager.FullName "platforms;android-36" "build-tools;36.0.0"
 
                 - name: Build HarmonyOS scrcpy server
                   shell: pwsh
