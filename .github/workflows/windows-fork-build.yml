@@ -1,0 +1,128 @@
+name: Windows HarmonyOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feature/harmonyos-pc-mode
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK 36
+        shell: pwsh
+        run: |
+          $sdkRoot = $env:ANDROID_HOME
+          if (-not $sdkRoot) { $sdkRoot = $env:ANDROID_SDK_ROOT }
+          if (-not $sdkRoot) { $sdkRoot = "C:\Android\android-sdk" }
+
+          $sdkManager = Get-ChildItem -Path (Join-Path $sdkRoot "cmdline-tools") -Filter "sdkmanager.bat" -Recurse -ErrorAction Stop |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $sdkManager) { throw "sdkmanager.bat not found under $sdkRoot" }
+
+          1..20 | ForEach-Object { "y" } | & $sdkManager --licenses | Out-Null
+          & $sdkManager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build HarmonyOS scrcpy server
+        shell: pwsh
+        run: ./scripts/build_harmony_server.ps1
+
+      - name: Apply fork customizations
+        run: |
+          python scripts/apply_fork_customizations.py
+          python scripts/apply_app_picker_improvements.py
+          python scripts/apply_app_names_orientation.py
+          python scripts/apply_harmony_desktop.py
+          python scripts/apply_harmony_latency_fix.py
+          python scripts/apply_harmony_session_behavior.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npm run lint
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Build Windows bundles
+        run: npm run tauri build
+
+      - name: Prepare portable Harmony server
+        shell: pwsh
+        run: |
+          Copy-Item src-tauri/resources/scrcpy-server-harmony src-tauri/target/release/scrcpy-server-harmony
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScrcpyGUI-Windows-HarmonyOS-PC-Mode
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/release/ScrcpyGUI.exe
+            src-tauri/target/release/scrcpy-server-harmony
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+
+
+      - name: Publish HarmonyOS prerelease
+        if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[harmony-preview]')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v4.1.0-harmony.1"
+          $title = "ScrcpyGUI v4.1.0 HarmonyOS PC Mode Preview 1"
+          $notes = @"
+          Experimental Windows prerelease adding Huawei / HarmonyOS PC Mode support through a CastPlusDisplay virtual display.
+
+          Verified path:
+          - scrcpy 4.1 based Harmony server
+          - USB ADB
+          - 1920x1080 / 240 DPI
+          - UHID keyboard + mouse
+          - Right Ctrl releases mouse capture
+
+          Known limitation: Huawei IME candidate UI may remain hidden with UHID keyboard input. See docs/HARMONYOS_PC_MODE.md for details.
+          "@
+
+          $assets = @(
+            "src-tauri/target/release/ScrcpyGUI.exe",
+            "src-tauri/target/release/scrcpy-server-harmony"
+          )
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" | ForEach-Object { $_.FullName }
+
+          gh release create $tag $assets --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title $title --notes $notes --prerelease
