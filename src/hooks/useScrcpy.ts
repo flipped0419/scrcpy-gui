@@ -56,6 +56,10 @@ export interface ScrcpyConfig {
     vdWidth?: number;
     vdHeight?: number;
     vdDpi?: number;
+    startApp?: string;
+    vdOrientation?: 'auto' | 'portrait' | 'landscape';
+    harmonyDesktop?: boolean;
+    shortcutMod?: 'lctrl' | 'rctrl' | 'lalt' | 'ralt' | 'lsuper' | 'rsuper';
     rotation?: string;
     res?: string;
     aspectRatioLock?: boolean;
@@ -143,6 +147,10 @@ export function useScrcpy() {
         vdWidth: 1920,
         vdHeight: 1080,
         vdDpi: 420,
+        startApp: "",
+        vdOrientation: 'auto',
+        harmonyDesktop: false,
+        shortcutMod: 'rctrl',
         aspectRatioLock: true,
         hidKeyboard: false,
         hidMouse: false,

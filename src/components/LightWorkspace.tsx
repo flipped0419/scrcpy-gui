@@ -1,24 +1,6 @@
-from __future__ import annotations
-
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def read_text(relative: str) -> str:
-    return (ROOT / relative).read_text(encoding="utf-8")
-
-
-def write_text(relative: str, content: str) -> None:
-    path = ROOT / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-LIGHT_WORKSPACE = r'''import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import type { MdnsDevice, RenderDriverSupport, ScrcpyConfig } from '../hooks/useScrcpy';
 import Sidebar from './Sidebar';
-import ControlPanel from './ControlPanel';
 import LogPanel from './LogPanel';
 import ShortcutsPanel from './ShortcutsPanel';
 
@@ -97,7 +79,7 @@ export default function LightWorkspace(props: LightWorkspaceProps) {
         onRefresh, onKillAdb, selectedDevice, onSelectDevice, onPair, onConnect,
         isRefreshing, onFilePush, historyDevices, clearHistory, mdnsDevices,
         logs, onClearLogs, onAddLog, onRunCommand, detectedCameras,
-        renderDriverSupport, onListOptions, binaryStatus, onDownload, onSetPath,
+        renderDriverSupport, binaryStatus, onDownload, onSetPath,
         onResetPath, isDownloading, downloadProgress, version, colorMode, onColorModeChange,
     } = props;
 
@@ -263,11 +245,30 @@ export default function LightWorkspace(props: LightWorkspaceProps) {
                                 <div className="win-divider" />
                                 <div className="win-row-section">
                                     <div className="win-row-title">输入</div>
-                                    <div className="win-toggle-grid">
-                                        <Toggle checked={isHarmony || !!config.hidMouse} disabled={isHarmony} label="UHID 鼠标" onChange={checked => patch({ hidMouse: checked })} />
-                                        <Toggle checked={isHarmony || !!config.hidKeyboard} disabled={isHarmony} label="UHID 键盘" onChange={checked => patch({ hidKeyboard: checked })} />
+                                    <div className="win-input-controls">
+                                        <div className="win-toggle-grid">
+                                            <Toggle checked={isHarmony || !!config.hidMouse} disabled={isHarmony} label="UHID 鼠标" onChange={checked => patch({ hidMouse: checked })} />
+                                            <Toggle checked={isHarmony || !!config.hidKeyboard} disabled={isHarmony} label="UHID 键盘" onChange={checked => patch({ hidKeyboard: checked })} />
+                                        </div>
+                                        {isHarmony && (
+                                            <label className="win-field win-shortcut-field">
+                                                <span>释放鼠标快捷键</span>
+                                                <select
+                                                    className="win-select"
+                                                    value={config.shortcutMod || 'rctrl'}
+                                                    onChange={e => patch({ shortcutMod: e.target.value as ScrcpyConfig['shortcutMod'] })}
+                                                >
+                                                    <option value="rctrl">右 Ctrl</option>
+                                                    <option value="lctrl">左 Ctrl</option>
+                                                    <option value="lalt">左 Alt</option>
+                                                    <option value="ralt">右 Alt</option>
+                                                    <option value="lsuper">左 Windows</option>
+                                                    <option value="rsuper">右 Windows</option>
+                                                </select>
+                                            </label>
+                                        )}
                                     </div>
-                                    {isHarmony && <span className="win-note">鸿蒙电脑模式固定使用 UHID 键鼠，并使用 Right Ctrl 作为 scrcpy 快捷修饰键。</span>}
+                                    {isHarmony && <span className="win-note">该按键同时作为 scrcpy 快捷键修饰键；按下它可切换 UHID 鼠标捕获。默认右 Ctrl。</span>}
                                 </div>
 
                                 <div className="win-divider" />
@@ -299,17 +300,122 @@ export default function LightWorkspace(props: LightWorkspaceProps) {
 
                     <details className="win-details">
                         <summary>高级设置</summary>
-                        <div className="win-details-body native-advanced">
-                            <ControlPanel
-                                config={config}
-                                setConfig={setConfig}
-                                onStart={onStart}
-                                onStop={onStop}
-                                isRunning={isRunning}
-                                detectedCameras={detectedCameras}
-                                renderDriverSupport={renderDriverSupport}
-                                onListOptions={onListOptions}
-                            />
+                        <div className="win-details-body win-advanced-only">
+                            <section className="win-advanced-section">
+                                <h3>视频与渲染</h3>
+                                <div className="win-advanced-grid">
+                                    <label className="win-field">
+                                        <span>渲染器</span>
+                                        <select className="win-select" value={config.renderDriver || 'auto'} onChange={e => patch({ renderDriver: e.target.value === 'auto' ? undefined : e.target.value })}>
+                                            <option value="auto">自动</option>
+                                            {renderDriverSupport.supportedDrivers.map(driver => (
+                                                <option key={driver.id} value={driver.id}>{driver.label}</option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                    <label className="win-field">
+                                        <span>背景颜色</span>
+                                        <input className="win-input" value={config.backgroundColor || ''} placeholder="#000000" onChange={e => patch({ backgroundColor: e.target.value })} />
+                                    </label>
+                                </div>
+                                <div className="win-advanced-toggles">
+                                    <Toggle checked={config.vsync !== false} label="VSync" onChange={checked => patch({ vsync: checked })} />
+                                    <Toggle checked={!!config.ignoreVideoEncoderConstraints} label="忽略编码器尺寸限制" onChange={checked => patch({ ignoreVideoEncoderConstraints: checked })} />
+                                    <Toggle checked={config.rememberWindowPosition !== false} label="记住窗口位置" onChange={checked => patch({ rememberWindowPosition: checked })} />
+                                </div>
+                            </section>
+
+                            <section className="win-advanced-section">
+                                <h3>音频与录像</h3>
+                                <div className="win-advanced-grid">
+                                    <label className="win-field">
+                                        <span>音频编码</span>
+                                        <select className="win-select" value={config.audioCodec || 'auto'} onChange={e => patch({ audioCodec: e.target.value })}>
+                                            <option value="auto">自动</option>
+                                            <option value="opus">Opus</option>
+                                            <option value="aac">AAC</option>
+                                            <option value="flac">FLAC</option>
+                                            <option value="raw">RAW</option>
+                                        </select>
+                                    </label>
+                                    <label className="win-field">
+                                        <span>录像保存位置</span>
+                                        <input className="win-input" value={config.recordPath || ''} onChange={e => patch({ recordPath: e.target.value })} />
+                                    </label>
+                                </div>
+                            </section>
+
+                            {mode === 'desktop' && (
+                                <section className="win-advanced-section">
+                                    <h3>虚拟桌面</h3>
+                                    <div className="win-advanced-grid three">
+                                        <label className="win-field">
+                                            <span>显示方向</span>
+                                            <select className="win-select" value={config.vdOrientation || 'auto'} onChange={e => patch({ vdOrientation: e.target.value as ScrcpyConfig['vdOrientation'] })}>
+                                                <option value="auto">自动</option>
+                                                <option value="landscape">横屏</option>
+                                                <option value="portrait">竖屏</option>
+                                            </select>
+                                        </label>
+                                        <label className="win-field"><span>自定义宽度</span><input className="win-input" type="number" min={320} value={config.vdWidth || 1920} onChange={e => patch({ vdWidth: Number(e.target.value) || 1920 })} /></label>
+                                        <label className="win-field"><span>自定义高度</span><input className="win-input" type="number" min={320} value={config.vdHeight || 1080} onChange={e => patch({ vdHeight: Number(e.target.value) || 1080 })} /></label>
+                                    </div>
+                                    <div className="win-advanced-grid">
+                                        <label className="win-field">
+                                            <span>启动应用包名</span>
+                                            <input className="win-input" value={config.startApp || ''} placeholder="com.example.app" onChange={e => patch({ startApp: e.target.value })} />
+                                        </label>
+                                    </div>
+                                    <div className="win-advanced-toggles">
+                                        <Toggle checked={!!config.flexDisplay} label="Flex Display" onChange={checked => patch({ flexDisplay: checked })} />
+                                    </div>
+                                </section>
+                            )}
+
+                            {mode === 'mirror' && (
+                                <section className="win-advanced-section">
+                                    <h3>手机屏幕输入</h3>
+                                    <div className="win-advanced-toggles">
+                                        <Toggle checked={!!config.otgPure} label="仅 OTG 控制" onChange={checked => patch({ otgPure: checked })} />
+                                        <Toggle checked={config.aspectRatioLock !== false} label="锁定宽高比" onChange={checked => patch({ aspectRatioLock: checked })} />
+                                    </div>
+                                </section>
+                            )}
+
+                            {isCamera && (
+                                <section className="win-advanced-section">
+                                    <h3>摄像头</h3>
+                                    <div className="win-advanced-grid three">
+                                        <label className="win-field">
+                                            <span>镜头方向</span>
+                                            <select className="win-select" value={config.cameraFacing || 'front'} onChange={e => patch({ cameraFacing: e.target.value })}>
+                                                <option value="front">前置</option>
+                                                <option value="back">后置</option>
+                                                <option value="external">外接</option>
+                                            </select>
+                                        </label>
+                                        <label className="win-field">
+                                            <span>摄像头 ID</span>
+                                            <select className="win-select" value={config.cameraId || ''} onChange={e => patch({ cameraId: e.target.value })}>
+                                                <option value="">自动</option>
+                                                {detectedCameras.map(camera => <option key={camera.id} value={camera.id}>{camera.name || camera.id}</option>)}
+                                            </select>
+                                        </label>
+                                        <label className="win-field"><span>宽高比</span><input className="win-input" value={config.cameraAr || ''} placeholder="sensor / 16:9" onChange={e => patch({ cameraAr: e.target.value })} /></label>
+                                    </div>
+                                    <div className="win-advanced-grid">
+                                        <label className="win-field"><span>缩放</span><input className="win-input" type="number" min={1} step={0.1} value={config.cameraZoom || 1} onChange={e => patch({ cameraZoom: Number(e.target.value) || 1 })} /></label>
+                                    </div>
+                                    <div className="win-advanced-toggles">
+                                        <Toggle checked={!!config.cameraHighSpeed} label="高速摄像" onChange={checked => patch({ cameraHighSpeed: checked })} />
+                                        <Toggle checked={!!config.cameraTorch} label="手电筒" onChange={checked => patch({ cameraTorch: checked })} />
+                                    </div>
+                                </section>
+                            )}
+
+                            {isHarmony && (
+                                <div className="win-info-box">鸿蒙电脑模式的分辨率、DPI、帧率、码率、编码、UHID 键鼠、释放鼠标快捷键和行为设置均在上方主面板配置，这里不再重复显示。</div>
+                            )}
                         </div>
                     </details>
 
@@ -329,249 +435,3 @@ export default function LightWorkspace(props: LightWorkspaceProps) {
         </div>
     );
 }
-'''
-
-LIGHT_CSS = r'''.win-native {
-    --win-bg: #f3f3f3;
-    --win-surface: #ffffff;
-    --win-surface-2: #f8f8f8;
-    --win-border: #d1d1d1;
-    --win-border-strong: #b8b8b8;
-    --win-text: #1a1a1a;
-    --win-muted: #616161;
-    --win-accent: #0067c0;
-    --win-accent-hover: #005a9e;
-    --win-danger: #c42b1c;
-    min-height: 100vh;
-    background: var(--win-bg);
-    color: var(--win-text);
-    font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-    font-size: 13px;
-}
-
-[data-mode='dark'] .win-native,
-[data-mode='system'] .win-native {
-    --win-bg: #202020;
-    --win-surface: #2b2b2b;
-    --win-surface-2: #252525;
-    --win-border: #414141;
-    --win-border-strong: #555555;
-    --win-text: #f2f2f2;
-    --win-muted: #b8b8b8;
-    --win-accent: #60cdff;
-    --win-accent-hover: #76d6ff;
-    --win-danger: #ff99a4;
-}
-
-.win-titlebar {
-    height: 54px;
-    padding: 0 18px;
-    display: grid;
-    grid-template-columns: minmax(180px, 1fr) auto minmax(280px, 1fr);
-    align-items: center;
-    gap: 16px;
-    background: var(--win-surface);
-    border-bottom: 1px solid var(--win-border);
-}
-
-.win-brand, .win-device-status, .win-title-actions, .win-inline-input, .win-action-row { display: flex; align-items: center; }
-.win-brand { gap: 10px; }
-.win-brand > div:last-child { display: flex; align-items: baseline; gap: 8px; }
-.win-brand strong { font-size: 14px; font-weight: 600; }
-.win-brand span, .win-connection-state, .win-download-progress { color: var(--win-muted); font-size: 12px; }
-.win-app-icon { width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; background: var(--win-accent); color: #fff; font-weight: 700; }
-.win-device-status { gap: 8px; min-width: 0; }
-.win-device-name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.win-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #8a8a8a; }
-.win-status-dot.online { background: #0f9d58; }
-.win-title-actions { justify-content: flex-end; gap: 8px; }
-
-.win-body { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: calc(100vh - 54px); }
-.win-sidebar { background: var(--win-surface-2); border-right: 1px solid var(--win-border); padding: 14px 12px 20px; overflow-y: auto; }
-.win-content { padding: 22px 26px 34px; max-width: 980px; width: 100%; margin: 0 auto; }
-.win-section-title { padding: 0 8px 8px; color: var(--win-muted); font-size: 12px; font-weight: 600; }
-
-.win-panel, .win-details { background: var(--win-surface); border: 1px solid var(--win-border); border-radius: 8px; }
-.win-primary-panel { padding: 22px; }
-.win-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
-.win-section-heading h1 { margin: 0 0 4px; font-size: 20px; font-weight: 600; line-height: 1.2; }
-.win-section-heading p { margin: 0; color: var(--win-muted); font-size: 12px; }
-.win-binary-state { color: var(--win-muted); font-size: 12px; white-space: nowrap; }
-.win-field-group { margin-bottom: 20px; }
-.win-label, .win-field > span { display: block; color: var(--win-muted); font-size: 12px; margin-bottom: 6px; }
-.win-settings-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.win-field { min-width: 0; }
-.win-inline-input { gap: 7px; }
-.win-inline-input .win-input { flex: 1; min-width: 0; }
-.win-inline-input > span { color: var(--win-muted); }
-
-.win-segmented { display: grid; border: 1px solid var(--win-border); border-radius: 6px; overflow: hidden; background: var(--win-surface-2); }
-.win-segmented.four { grid-template-columns: repeat(4, 1fr); }
-.win-segmented button { min-height: 34px; padding: 5px 10px; border: 0; border-right: 1px solid var(--win-border); background: transparent; color: var(--win-text); font: inherit; cursor: pointer; }
-.win-segmented button:last-child { border-right: 0; }
-.win-segmented button:hover { background: color-mix(in srgb, var(--win-accent) 8%, transparent); }
-.win-segmented button.active { background: color-mix(in srgb, var(--win-accent) 15%, var(--win-surface)); color: var(--win-accent); box-shadow: inset 0 -2px 0 var(--win-accent); font-weight: 600; }
-
-.win-input, .win-select { height: 32px; width: 100%; box-sizing: border-box; border: 1px solid var(--win-border-strong); border-radius: 4px; background: var(--win-surface); color: var(--win-text); padding: 4px 9px; font: inherit; outline: none; }
-.win-input:focus, .win-select:focus { border-color: var(--win-accent); box-shadow: inset 0 -1px 0 var(--win-accent); }
-.win-select.compact { width: auto; min-width: 104px; }
-
-.win-divider { height: 1px; background: var(--win-border); margin: 20px 0; }
-.win-row-section { display: grid; grid-template-columns: 80px 1fr; gap: 10px 18px; align-items: start; }
-.win-row-title { font-weight: 600; padding-top: 2px; }
-.win-toggle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
-.win-toggle-grid.behavior { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.win-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; user-select: none; }
-.win-toggle input { accent-color: var(--win-accent); width: 15px; height: 15px; }
-.win-toggle.is-disabled { opacity: .62; cursor: default; }
-.win-note { color: var(--win-muted); font-size: 12px; grid-column: 2 / -1; }
-.win-info-box { padding: 12px; border: 1px solid var(--win-border); border-radius: 6px; background: var(--win-surface-2); color: var(--win-muted); }
-
-.win-action-row { justify-content: space-between; gap: 16px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--win-border); }
-.win-button { min-height: 30px; border: 1px solid var(--win-border-strong); border-radius: 4px; padding: 4px 12px; background: var(--win-surface); color: var(--win-text); font: inherit; cursor: pointer; }
-.win-button:hover { background: var(--win-surface-2); }
-.win-button.ghost { border-color: transparent; background: transparent; color: var(--win-muted); }
-.win-button.primary { border-color: var(--win-accent); background: var(--win-accent); color: #fff; font-weight: 600; }
-[data-mode='dark'] .win-button.primary { color: #00364d; }
-.win-button.primary:hover { background: var(--win-accent-hover); }
-.win-button.primary.danger { background: var(--win-danger); border-color: var(--win-danger); color: #fff; }
-.win-button.large { min-height: 36px; padding-inline: 20px; }
-.win-button:disabled { opacity: .45; cursor: default; }
-
-.win-details { margin-top: 12px; overflow: hidden; }
-.win-details > summary { cursor: pointer; list-style: none; padding: 12px 14px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
-.win-details > summary::-webkit-details-marker { display: none; }
-.win-details > summary::before { content: '›'; color: var(--win-muted); display: inline-block; margin-right: 8px; transition: transform .12s ease; }
-.win-details[open] > summary::before { transform: rotate(90deg); }
-.win-details-body { border-top: 1px solid var(--win-border); padding: 14px; }
-
-/* Flatten the inherited ScrcpyGUI components when they are used inside the new shell. */
-.win-native .glass { background: transparent !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important; }
-.win-native [class*="shadow-"] { box-shadow: none !important; }
-.win-native [class*="backdrop-blur"] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-.win-native .win-sidebar .glass, .win-native .native-advanced .glass { border-color: var(--win-border) !important; background: var(--win-surface) !important; }
-.win-native .win-sidebar [class*="rounded-2xl"], .win-native .win-sidebar [class*="rounded-xl"], .win-native .native-advanced [class*="rounded-2xl"], .win-native .native-advanced [class*="rounded-xl"] { border-radius: 6px !important; }
-.win-native .native-advanced main { display: block; }
-.win-native .native-advanced main > * { margin-bottom: 10px; }
-.win-native .native-advanced button, .win-native .win-sidebar button { transition-duration: 0ms !important; }
-
-@media (max-width: 980px) {
-    .win-titlebar { grid-template-columns: 1fr auto; }
-    .win-device-status { display: none; }
-    .win-body { grid-template-columns: 210px minmax(0, 1fr); }
-    .win-settings-grid, .win-toggle-grid.behavior { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .win-segmented.four { grid-template-columns: repeat(2, 1fr); }
-}
-
-@media (max-width: 720px) {
-    .win-titlebar { height: auto; min-height: 54px; grid-template-columns: 1fr; padding-block: 10px; }
-    .win-title-actions { justify-content: flex-start; flex-wrap: wrap; }
-    .win-body { display: block; }
-    .win-sidebar { border-right: 0; border-bottom: 1px solid var(--win-border); max-height: 260px; }
-    .win-content { box-sizing: border-box; padding: 14px; }
-    .win-settings-grid, .win-toggle-grid.behavior, .win-toggle-grid { grid-template-columns: 1fr; }
-    .win-row-section { grid-template-columns: 1fr; }
-    .win-note { grid-column: 1; }
-}
-'''
-
-write_text("src/components/LightWorkspace.tsx", LIGHT_WORKSPACE)
-write_text("src/light-ui.css", LIGHT_CSS)
-
-app_path = "src/App.tsx"
-app = read_text(app_path)
-for line in [
-    'import Sidebar from "./components/Sidebar";\n',
-    'import ControlPanel from "./components/ControlPanel";\n',
-    'import LogPanel from "./components/LogPanel";\n',
-    'import Header from "./components/Header";\n',
-    'import SessionBehavior from "./components/SessionBehavior";\n',
-    'import ShortcutsPanel from "./components/ShortcutsPanel";\n',
-    'import Footer from "./components/Footer";\n',
-]:
-    app = app.replace(line, "")
-
-needle = 'import ErrorBoundary from "./components/ErrorBoundary";\n'
-if needle not in app:
-    raise RuntimeError("Could not find ErrorBoundary import in App.tsx")
-app = app.replace(needle, 'import LightWorkspace from "./components/LightWorkspace";\nimport "./light-ui.css";\n' + needle, 1)
-
-start = app.find('  return (\n    <ErrorBoundary>')
-end_marker = '  );\n}\n\nexport default App;'
-end = app.rfind(end_marker)
-if start < 0 or end < 0:
-    raise RuntimeError("Could not locate App.tsx return block")
-
-new_return = r'''  return (
-    <ErrorBoundary>
-      <LightWorkspace
-        config={config}
-        setConfig={setConfig}
-        onStart={handleStart}
-        onStop={handleStop}
-        isRunning={sessionRunning}
-        devices={devices}
-        deviceModels={deviceModels}
-        deviceFriendlyNames={deviceFriendlyNames}
-        runningDevices={runningDevices}
-        onRefresh={handleRefresh}
-        onKillAdb={handleKillAdb}
-        selectedDevice={activeDevice}
-        onSelectDevice={setActiveDevice}
-        onPair={pairDevice}
-        onConnect={connectDevice}
-        isRefreshing={isRefreshing}
-        onFilePush={handleFileBrowse}
-        historyDevices={historyDevices}
-        clearHistory={clearHistory}
-        mdnsDevices={mdnsDevices}
-        logs={logs}
-        onClearLogs={clearLogs}
-        onAddLog={(msg) => setLogs((prev: string[]) => [...prev.slice(-100), msg])}
-        onRunCommand={runTerminalCommand}
-        detectedCameras={detectedCameras}
-        renderDriverSupport={renderDriverSupport}
-        onListOptions={(arg) => { if (activeDevice) listScrcpyOptions(activeDevice, arg); }}
-        binaryStatus={scrcpyStatus}
-        onDownload={downloadScrcpy}
-        onSetPath={handleSetPath}
-        onResetPath={handleResetPath}
-        isDownloading={isDownloading}
-        downloadProgress={downloadProgress}
-        version={appVersion}
-        colorMode={colorMode}
-        onColorModeChange={setColorMode}
-      />
-
-      <OnboardingModal
-        isOpen={isOnboardingOpen}
-        onClose={() => setIsOnboardingOpen(false)}
-        binaryStatus={scrcpyStatus}
-        onDownload={downloadScrcpy}
-        isDownloading={isDownloading}
-        downloadProgress={downloadProgress}
-        onComplete={completeOnboarding}
-      />
-
-      <ThemedModal
-        isOpen={alertState.isOpen}
-        onClose={() => setAlertState(prev => ({ ...prev, isOpen: false }))}
-        title={alertState.title}
-        message={alertState.message}
-        kind={alertState.kind}
-        actionLabel={alertState.actionLabel}
-        onAction={alertState.onAction}
-        showCancel={alertState.showCancel}
-        cancelLabel={alertState.cancelLabel}
-        onCancel={alertState.onCancel}
-      />
-    </ErrorBoundary>
-  );
-}
-
-export default App;'''
-
-app = app[:start] + new_return
-write_text(app_path, app)
-
-print("Windows-native lightweight UI applied successfully.")

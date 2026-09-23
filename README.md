@@ -109,3 +109,19 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 *ScrcpyGUI is an independent project and is not affiliated with Genymobile or scrcpy authors.*
 
+
+---
+
+## HarmonyOS PC Mode preview
+
+This fork includes an experimental HarmonyOS/Huawei PC Mode path based on a modified scrcpy v4.1 server.
+
+- The Harmony virtual display is named `CastPlusDisplay`, which lets tested Huawei/HarmonyOS devices hand the display to the native PC projection framework.
+- Harmony mode uses UHID keyboard and mouse input, with a configurable scrcpy shortcut modifier for releasing mouse capture.
+- Resolution, DPI, FPS, bitrate, codec, audio, recording, fullscreen, always-on-top and screen-off settings are shared with normal sessions.
+- Harmony mode intentionally does not use the ordinary virtual-desktop 100 ms video buffer.
+- Normal sessions use the stock `scrcpy-server`; Harmony mode uses `scrcpy-server-harmony`.
+
+The modified server binary is not stored in git. Run `scripts/build_harmony_server.ps1` or use CI to build it reproducibly from official scrcpy v4.1 source.
+
+Tested with a Huawei/Honor device on HarmonyOS 4.2. This relies on internal platform behavior and may vary by firmware/device. It is not an official Huawei/Honor integration.

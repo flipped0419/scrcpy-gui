@@ -108,6 +108,7 @@ pub fn run() {
             commands::greet,
             commands::check_scrcpy,
             commands::get_devices,
+            commands::get_launchable_apps,
             commands::adb_connect,
             commands::get_mdns_devices,
             commands::adb_pair,

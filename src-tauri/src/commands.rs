@@ -261,6 +261,158 @@ pub async fn get_devices(custom_path: Option<String>) -> serde_json::Value {
 }
 
 #[tauri::command]
+pub async fn get_launchable_apps(device: String, custom_path: Option<String>) -> serde_json::Value {
+    let adb_path = get_binary_path("adb", custom_path.clone());
+    let scrcpy_path = get_binary_path("scrcpy", custom_path);
+    let mut apps: Vec<String> = Vec::new();
+    let mut user_packages = std::collections::HashSet::<String>::new();
+
+    if let Ok(output) = create_command(&adb_path)
+        .arg("-s")
+        .arg(&device)
+        .args(["shell", "pm", "list", "packages", "-3"])
+        .output()
+        .await
+    {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if let Some(package) = line.trim().strip_prefix("package:") {
+                    let package = package.trim();
+                    if !package.is_empty() {
+                        user_packages.insert(package.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let launcher_query = create_command(&adb_path)
+        .arg("-s")
+        .arg(&device)
+        .args([
+            "shell",
+            "cmd",
+            "package",
+            "query-activities",
+            "--brief",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            "android.intent.category.LAUNCHER",
+        ])
+        .output()
+        .await;
+
+    if let Ok(output) = launcher_query {
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let line = line.trim();
+                if let Some((package, _activity)) = line.split_once('/') {
+                    let package = package.trim();
+                    if !package.is_empty() {
+                        apps.push(package.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Vendor-ROM fallback: at least keep user-installed packages selectable.
+    if apps.is_empty() {
+        apps.extend(user_packages.iter().cloned());
+    }
+
+    apps.sort_by_key(|value| value.to_ascii_lowercase());
+    apps.dedup();
+    let launchable = apps.iter().cloned().collect::<std::collections::HashSet<_>>();
+    let mut app_names = std::collections::HashMap::<String, String>::new();
+
+    // scrcpy's server resolves localized application labels using Android's own
+    // PackageManager. It may take a few seconds on devices with many apps, so
+    // this is done only when the Desktop app picker is refreshed/opened.
+    if let Ok(output) = create_command(&scrcpy_path)
+        .arg("-s")
+        .arg(&device)
+        .arg("--list-apps")
+        .output()
+        .await
+    {
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut pending_name: Option<String> = None;
+
+        for raw in combined.lines() {
+            let mut line = raw.trim();
+            // scrcpy server logs normally prefix only the first line, but some
+            // environments may repeat the log prefix on every line.
+            if let Some(pos) = line.find("INFO: ") {
+                line = &line[(pos + 6)..];
+            }
+
+            let marked = line
+                .strip_prefix("* ")
+                .or_else(|| line.strip_prefix("- "));
+
+            if let Some(rest) = marked {
+                let rest = rest.trim_end();
+                let mut matched_package: Option<&String> = None;
+                for package in &launchable {
+                    if rest == package || (rest.ends_with(package.as_str()) && rest[..rest.len() - package.len()].ends_with(char::is_whitespace)) {
+                        matched_package = Some(package);
+                        break;
+                    }
+                }
+
+                if let Some(package) = matched_package {
+                    let name = rest[..rest.len() - package.len()].trim();
+                    if !name.is_empty() {
+                        app_names.insert(package.clone(), name.to_string());
+                    }
+                    pending_name = None;
+                } else if !rest.is_empty() {
+                    // Long names are wrapped by scrcpy: the package appears on
+                    // the following indented line.
+                    pending_name = Some(rest.trim().to_string());
+                }
+                continue;
+            }
+
+            if let Some(name) = pending_name.take() {
+                let package = line.trim();
+                if launchable.contains(package) {
+                    app_names.insert(package.to_string(), name);
+                }
+            }
+        }
+    }
+
+    let mut items: Vec<serde_json::Value> = apps
+        .into_iter()
+        .map(|package| {
+            let is_user = user_packages.contains(&package);
+            let name = app_names
+                .get(&package)
+                .cloned()
+                .unwrap_or_else(|| package.clone());
+            json!({ "package": package, "name": name, "user": is_user })
+        })
+        .collect();
+
+    items.sort_by(|a, b| {
+        let an = a.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+        let bn = b.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+        an.cmp(&bn)
+    });
+
+    json!({ "success": true, "apps": items })
+}
+
+#[tauri::command]
 pub async fn get_mdns_devices(custom_path: Option<String>) -> serde_json::Value {
     let adb_path = get_binary_path("adb", custom_path);
     
@@ -731,6 +883,10 @@ pub struct ScrcpyConfig {
     vd_width: Option<u32>,
     vd_height: Option<u32>,
     vd_dpi: Option<u32>,
+    start_app: Option<String>,
+    vd_orientation: Option<String>,
+    harmony_desktop: Option<bool>,
+    shortcut_mod: Option<String>,
     rotation: Option<String>,
     res: Option<String>,
     hid_keyboard: Option<bool>,
@@ -1121,8 +1277,9 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
     args.push(format!("--video-codec={}", codec));
 
     let otg_pure = config.otg_pure.unwrap_or(false);
-    let hid_keyboard = config.hid_keyboard.unwrap_or(false);
-    let hid_mouse = config.hid_mouse.unwrap_or(false);
+    let harmony_desktop = config.session_mode == "desktop" && config.harmony_desktop.unwrap_or(false);
+    let hid_keyboard = config.hid_keyboard.unwrap_or(false) || harmony_desktop;
+    let hid_mouse = config.hid_mouse.unwrap_or(false) || harmony_desktop;
 
     if config.session_mode == "mirror" && (hid_keyboard || hid_mouse) && otg_pure {
         if config.device.contains('.') || config.device.contains(':') {
@@ -1139,6 +1296,14 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
         }
         if hid_mouse {
             args.push("--mouse=uhid".to_string());
+        }
+        if harmony_desktop {
+            let requested = config.shortcut_mod.as_deref().unwrap_or("rctrl");
+            let shortcut_mod = match requested {
+                "lctrl" | "rctrl" | "lalt" | "ralt" | "lsuper" | "rsuper" => requested,
+                _ => "rctrl",
+            };
+            args.push(format!("--shortcut-mod={}", shortcut_mod));
         }
 
         if let Some(render_driver) = &config.render_driver {
@@ -1169,7 +1334,7 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
         // mirror sessions only. Skipped in fullscreen (scrcpy ignores it) and
         // for camera/desktop, whose windows must not share, or overwrite, the
         // mirror window's remembered position.
-        if config.session_mode == "mirror" && !config.fullscreen.unwrap_or(false) {
+        if (config.session_mode == "mirror" || harmony_desktop) && !config.fullscreen.unwrap_or(false) {
             if let Some(wx) = config.window_x {
                 args.push(format!("--window-x={}", wx));
             }
@@ -1232,13 +1397,33 @@ fn build_scrcpy_args(config: &ScrcpyConfig, video_dir_fallback: Option<String>, 
             }
              // fps handled generically below
         } else if config.session_mode == "desktop" {
-             let w = config.vd_width.unwrap_or(1920);
-             let h = config.vd_height.unwrap_or(1080);
-             let dpi = config.vd_dpi.unwrap_or(420);
+             let mut w = config.vd_width.unwrap_or(1920);
+             let mut h = config.vd_height.unwrap_or(1080);
+             match config.vd_orientation.as_deref() {
+                 Some("portrait") if w > h => std::mem::swap(&mut w, &mut h),
+                 Some("landscape") if h > w => std::mem::swap(&mut w, &mut h),
+                 _ => {}
+             }
+             let dpi = config.vd_dpi.unwrap_or(if harmony_desktop { 240 } else { 420 });
              args.push(format!("--new-display={}x{}/{}", w, h, dpi));
-             args.push("--video-buffer=100".to_string());
-             // v4: flex display (resize virtual display with window)
-             if let Some(true) = config.flex_display { args.push("--flex-display".to_string()); }
+             if !harmony_desktop {
+                 args.push("--video-buffer=100".to_string());
+             }
+
+             // Huawei PC mode owns the desktop shell once CastPlusDisplay is
+             // created. App auto-launch and dynamic Flex Display are therefore
+             // intentionally kept for the ordinary virtual-display mode only.
+             if !harmony_desktop {
+                 if let Some(ref app) = config.start_app {
+                     let app = app.trim();
+                     if !app.is_empty() {
+                         args.push(format!("--start-app={}", app));
+                     }
+                 }
+                 if let Some(true) = config.flex_display {
+                     args.push("--flex-display".to_string());
+                 }
+             }
         }
         
         if let Some(fps) = config.fps {
@@ -1413,6 +1598,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     let video_dir = app_handle.path().video_dir().ok().map(|p| p.to_string_lossy().to_string());
 
     let exe_path = get_binary_path("scrcpy", config.scrcpy_path.clone());
+    let harmony_desktop = config.session_mode == "desktop" && config.harmony_desktop.unwrap_or(false);
 
     // Log the session details for the user
     let mode_label = match config.session_mode.as_str() {
@@ -1434,7 +1620,36 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     }
 
     let adb_exe_path = get_binary_path("adb", config.scrcpy_path.clone());
-    let server_path = if !exe_path.is_empty() && exe_path != "scrcpy" {
+    let server_path = if harmony_desktop {
+        let mut candidates = Vec::new();
+
+        if !exe_path.is_empty() && exe_path != "scrcpy" {
+            if let Some(parent) = Path::new(&exe_path).parent() {
+                candidates.push(parent.join("scrcpy-server-harmony"));
+            }
+        }
+
+        if let Ok(gui_exe) = std::env::current_exe() {
+            if let Some(parent) = gui_exe.parent() {
+                candidates.push(parent.join("scrcpy-server-harmony"));
+                candidates.push(parent.join("resources").join("scrcpy-server-harmony"));
+            }
+        }
+
+        if let Ok(resource_dir) = app_handle.path().resource_dir() {
+            candidates.push(resource_dir.join("scrcpy-server-harmony"));
+            candidates.push(resource_dir.join("resources").join("scrcpy-server-harmony"));
+        }
+
+        let harmony_server = candidates
+            .into_iter()
+            .find(|path| path.is_file())
+            .ok_or_else(|| {
+                "HarmonyOS desktop server not found. Expected scrcpy-server-harmony next to scrcpy or in the app resources.".to_string()
+            })?;
+
+        Some(harmony_server.to_string_lossy().to_string())
+    } else if !exe_path.is_empty() && exe_path != "scrcpy" {
         Path::new(&exe_path).parent().map(|p| p.join("scrcpy-server").to_string_lossy().to_string())
     } else {
         None
@@ -1442,6 +1657,10 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
 
     let _ = window.emit("scrcpy-log", format!("[SYSTEM] Using scrcpy: {}", exe_path));
     let _ = window.emit("scrcpy-log", format!("[SYSTEM] Using adb: {}", adb_exe_path));
+    if let Some(ref sp) = server_path {
+        let label = if harmony_desktop { "HarmonyOS server" } else { "scrcpy server" };
+        let _ = window.emit("scrcpy-log", format!("[SYSTEM] Using {}: {}", label, sp));
+    }
 
     // Decide whether automatic audio codec fallback should kick in on errors.
     let audio_enabled = config.audio_enabled.unwrap_or(true);
@@ -1487,7 +1706,7 @@ pub async fn run_scrcpy(window: Window, state: State<'_, ScrcpyState>, config: S
     // fullscreen session has no meaningful position (it would report the
     // monitor origin, e.g. 0,0), and camera/desktop sessions must not overwrite
     // the mirror window's remembered position.
-    let track_pos = config_mon.session_mode == "mirror" && !config_mon.fullscreen.unwrap_or(false);
+    let track_pos = (config_mon.session_mode == "mirror" || (config_mon.session_mode == "desktop" && config_mon.harmony_desktop.unwrap_or(false))) && !config_mon.fullscreen.unwrap_or(false);
 
     tokio::spawn(async move {
         let mut current_audio_flag = audio_error_flag;

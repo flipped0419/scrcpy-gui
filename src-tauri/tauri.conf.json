@@ -17,10 +17,11 @@
         "width": 1200,
         "height": 890,
         "visible": false,
-        "resizable": false,
+        "resizable": true,
         "center": true,
         "transparent": false,
-        "decorations": true
+        "decorations": true,
+        "zoomHotkeysEnabled": true
       },
       {
         "label": "splashscreen",
@@ -51,6 +52,9 @@
       "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/scrcpy-server-harmony"
     ]
   }
 }

@@ -38,3 +38,6 @@ scrcpy_temp.tar.gz
 
 # AI Handoff
 history/
+
+# Built locally or in CI; do not commit generated Harmony server
+src-tauri/resources/scrcpy-server-harmony

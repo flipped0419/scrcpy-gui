@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Play, Square, Monitor, Camera, LayoutGrid, ChevronDown, Lock, Unlock, Settings2, Video, ExternalLink, Keyboard, Mouse } from 'lucide-react';
 import { RenderDriverSupport, ScrcpyConfig } from '../../hooks/useScrcpy';
 import Tooltip from '../Tooltip';
@@ -78,6 +79,56 @@ export default function ControlPanel({
     renderDriverSupport = { hostOs: 'unknown', supportsRenderDriver: false, supportedDrivers: [] }
 }: ControlPanelProps) {
     const { t } = useI18n();
+    const [installedApps, setInstalledApps] = useState<{ package: string; name: string; user: boolean }[]>([]);
+    const [appsLoading, setAppsLoading] = useState(false);
+    const [appSearch, setAppSearch] = useState('');
+    const [appScope, setAppScope] = useState<'user' | 'all'>('user');
+    const [appPickerOpen, setAppPickerOpen] = useState(false);
+
+    const refreshInstalledApps = async () => {
+        if (!config.device) {
+            setInstalledApps([]);
+            return;
+        }
+        setAppsLoading(true);
+        try {
+            const result: any = await invoke('get_launchable_apps', {
+                device: config.device,
+                customPath: config.scrcpyPath,
+            });
+            if (result?.success && Array.isArray(result.apps)) {
+                setInstalledApps(result.apps);
+            } else {
+                setInstalledApps([]);
+            }
+        } catch (error) {
+            console.error('Failed to read installed apps:', error);
+            setInstalledApps([]);
+        } finally {
+            setAppsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (config.sessionMode === 'desktop' && config.device) {
+            void refreshInstalledApps();
+        } else if (config.sessionMode !== 'desktop') {
+            setInstalledApps([]);
+        }
+    }, [config.device, config.sessionMode, config.scrcpyPath]);
+
+    const filteredInstalledApps = installedApps.filter((app) => {
+        if (appScope === 'user' && !app.user) return false;
+        const q = appSearch.trim().toLowerCase();
+        if (!q) return true;
+        return app.package.toLowerCase().includes(q) || (app.name || '').toLowerCase().includes(q);
+    });
+
+    useEffect(() => {
+        if (!config.startApp || appPickerOpen) return;
+        const selected = installedApps.find(app => app.package === config.startApp);
+        if (selected) setAppSearch(selected.name || selected.package);
+    }, [installedApps, config.startApp, appPickerOpen]);
 
     const handleChange = (field: keyof ScrcpyConfig, value: any) => {
         setConfig({ ...config, [field]: value });
@@ -477,11 +528,12 @@ export default function ControlPanel({
                                     </div>
                                     <div className="flex items-center gap-3">
                                         {/* v4: Flex Display toggle */}
-                                        <Tooltip text={t('controlPanel.flexDisplayTooltip')}>
+                                        <Tooltip text={config.harmonyDesktop ? t('controlPanel.flexDisabledHarmony') : t('controlPanel.flexDisplayTooltip')}>
                                             <button
-                                                onClick={() => handleChange('flexDisplay', !config.flexDisplay)}
-                                                className={`flex items-center gap-1.5 transition-colors ${config.flexDisplay ? 'text-primary' : 'text-zinc-600 hover:text-zinc-400'}`}
-                                                title={t('controlPanel.flexDisplay')}
+                                                onClick={() => { if (!config.harmonyDesktop) handleChange('flexDisplay', !config.flexDisplay); }}
+                                                disabled={config.harmonyDesktop}
+                                                className={`flex items-center gap-1.5 transition-colors ${config.harmonyDesktop ? 'opacity-40 cursor-not-allowed text-zinc-700' : (config.flexDisplay ? 'text-primary' : 'text-zinc-600 hover:text-zinc-400')}`}
+                                                title={config.harmonyDesktop ? t('controlPanel.flexDisabledHarmony') : t('controlPanel.flexDisplay')}
                                             >
                                                 <span className={`text-[8px] font-black uppercase tracking-tighter px-1 py-0.5 rounded border transition-colors ${config.flexDisplay ? 'bg-primary/10 border-primary/40 text-primary' : 'border-zinc-700 text-zinc-600'}`}>
                                                     {t('controlPanel.flexDisplay')}
@@ -498,6 +550,68 @@ export default function ControlPanel({
                                         </button>
                                     </div>
                                 </div>
+
+                                <div className={`p-3 rounded-xl border transition-colors ${config.harmonyDesktop ? 'border-primary/50 bg-primary/5' : 'border-zinc-800 bg-zinc-950/30'}`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const enabled = !config.harmonyDesktop;
+                                            if (!enabled) {
+                                                setConfig({ ...config, harmonyDesktop: false });
+                                                return;
+                                            }
+                                            let w = config.vdWidth || 1920;
+                                            let h = config.vdHeight || 1080;
+                                            if (h > w) [w, h] = [h, w];
+                                            const dpi = (config.vdDpi || 420) === 420 ? 240 : (config.vdDpi || 240);
+                                            setConfig({
+                                                ...config,
+                                                harmonyDesktop: true,
+                                                vdOrientation: 'landscape',
+                                                vdWidth: w,
+                                                vdHeight: h,
+                                                vdDpi: dpi,
+                                                flexDisplay: false,
+                                            });
+                                        }}
+                                        className="w-full flex items-center justify-between gap-3 text-left"
+                                    >
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] font-black uppercase text-zinc-300 tracking-widest">{t('controlPanel.harmonyDesktop')}</span>
+                                                <span className="text-[7px] font-black uppercase px-1.5 py-0.5 rounded border border-primary/30 text-primary bg-primary/10">{t('controlPanel.experimental')}</span>
+                                            </div>
+                                            <p className="mt-1 text-[8px] leading-relaxed text-zinc-500">{t('controlPanel.harmonyDesktopDescription')}</p>
+                                        </div>
+                                        <div className={`w-8 h-4 shrink-0 rounded-full border p-0.5 transition-colors ${config.harmonyDesktop ? 'bg-primary border-primary' : 'bg-zinc-900 border-zinc-700'}`}>
+                                            <div className={`w-2.5 h-2.5 rounded-full transition-transform ${config.harmonyDesktop ? 'translate-x-3.5 bg-black' : 'translate-x-0 bg-zinc-500'}`} />
+                                        </div>
+                                    </button>
+                                    {config.harmonyDesktop && (
+                                        <div className="mt-2 pt-2 border-t border-zinc-800/60 flex flex-wrap gap-x-3 gap-y-1 text-[8px] text-zinc-500">
+                                            <span>{t('controlPanel.harmonyUhid')}</span>
+                                            <span>{t('controlPanel.harmonyShortcut')}</span>
+                                            <span>{t('controlPanel.harmonyLimitations')}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <CustomSelect
+                                    label={t('controlPanel.displayOrientation')}
+                                    value={config.vdOrientation || 'auto'}
+                                    onChange={(val: 'auto' | 'portrait' | 'landscape') => {
+                                        let w = config.vdWidth || 1920;
+                                        let h = config.vdHeight || 1080;
+                                        if (val === 'portrait' && w > h) [w, h] = [h, w];
+                                        if (val === 'landscape' && h > w) [w, h] = [h, w];
+                                        setConfig({ ...config, vdOrientation: val, vdWidth: w, vdHeight: h });
+                                    }}
+                                    options={[
+                                        { value: 'auto', label: t('controlPanel.orientationAuto') },
+                                        { value: 'portrait', label: t('controlPanel.orientationPortrait') },
+                                        { value: 'landscape', label: t('controlPanel.orientationLandscape') },
+                                    ]}
+                                />
 
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                                     <VDSlider
@@ -557,10 +671,14 @@ export default function ControlPanel({
                                             return "custom";
                                         })()}
                                         onChange={(val: string) => {
-                                            if (val === '1080p') setConfig({ ...config, vdWidth: 1920, vdHeight: 1080 });
-                                            if (val === '1440p') setConfig({ ...config, vdWidth: 2560, vdHeight: 1440 });
-                                            if (val === '4k') setConfig({ ...config, vdWidth: 3840, vdHeight: 2160 });
-                                            if (val === 'ultrawide') setConfig({ ...config, vdWidth: 2560, vdHeight: 1080 });
+                                            let w = 1920;
+                                            let h = 1080;
+                                            if (val === '1440p') [w, h] = [2560, 1440];
+                                            if (val === '4k') [w, h] = [3840, 2160];
+                                            if (val === 'ultrawide') [w, h] = [2560, 1080];
+                                            if (config.vdOrientation === 'portrait' && w > h) [w, h] = [h, w];
+                                            if (config.vdOrientation === 'landscape' && h > w) [w, h] = [h, w];
+                                            setConfig({ ...config, vdWidth: w, vdHeight: h });
                                         }}
                                         options={[
                                             { value: "1080p", label: t('controlPanel.preset1080p') },
@@ -570,6 +688,135 @@ export default function ControlPanel({
                                         ]}
                                     />
                                 </div>
+                            </div>
+
+                            <div className="p-3 rounded-xl border border-zinc-800 bg-zinc-950/30 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5">
+                                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">{t('controlPanel.startApp')}</label>
+                                        <Tooltip text={t('controlPanel.startAppHint')} placement="top" />
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            const w = config.vdWidth || 1920;
+                                            const h = config.vdHeight || 1080;
+                                            setConfig({ ...config, startApp: 'cn.com.langeasy.LangEasyLexis', vdOrientation: 'portrait', vdWidth: Math.min(w, h), vdHeight: Math.max(w, h) });
+                                            setAppSearch(t('controlPanel.bbdcPreset'));
+                                        }}
+                                        className="text-[8px] font-black uppercase text-primary hover:text-white transition-colors"
+                                    >
+                                        {t('controlPanel.bbdcPreset')}
+                                    </button>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <label className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">{t('controlPanel.installedApps')}</label>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                onClick={() => setAppScope('user')}
+                                                className={`px-1.5 py-0.5 rounded border text-[8px] font-black transition-colors ${appScope === 'user' ? 'border-primary/50 bg-primary/10 text-primary' : 'border-zinc-800 text-zinc-600 hover:text-zinc-400'}`}
+                                            >
+                                                {t('controlPanel.userApps')}
+                                            </button>
+                                            <button
+                                                onClick={() => setAppScope('all')}
+                                                className={`px-1.5 py-0.5 rounded border text-[8px] font-black transition-colors ${appScope === 'all' ? 'border-primary/50 bg-primary/10 text-primary' : 'border-zinc-800 text-zinc-600 hover:text-zinc-400'}`}
+                                            >
+                                                {t('controlPanel.allApps')}
+                                            </button>
+                                            <button
+                                                onClick={() => void refreshInstalledApps()}
+                                                disabled={appsLoading || !config.device}
+                                                className="px-1.5 py-0.5 rounded border border-zinc-800 text-[8px] font-black text-primary hover:border-primary/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                            >
+                                                {appsLoading ? '...' : t('common.refresh')}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            value={appSearch}
+                                            placeholder={t('controlPanel.searchApps')}
+                                            onChange={(e) => { setAppSearch(e.target.value); setAppPickerOpen(true); }}
+                                            onFocus={() => setAppPickerOpen(true)}
+                                            onBlur={() => window.setTimeout(() => setAppPickerOpen(false), 120)}
+                                            className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-2 py-1.5 text-[11px] text-zinc-300 focus:border-primary/60 focus:outline-none transition-colors"
+                                        />
+                                        {appPickerOpen && (
+                                            <div className="absolute z-[80] left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl custom-scrollbar">
+                                                <button
+                                                    onMouseDown={(e) => e.preventDefault()}
+                                                    onClick={() => { handleChange('startApp', ''); setAppSearch(''); setAppPickerOpen(false); }}
+                                                    className="w-full px-2.5 py-2 text-left text-[10px] font-bold text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200 transition-colors"
+                                                >
+                                                    {t('controlPanel.appListNone')}
+                                                </button>
+                                                {filteredInstalledApps.slice(0, 100).map((app) => (
+                                                    <button
+                                                        key={app.package}
+                                                        onMouseDown={(e) => e.preventDefault()}
+                                                        onClick={() => {
+                                                            const isBbdc = app.package === 'cn.com.langeasy.LangEasyLexis';
+                                                            if (isBbdc) {
+                                                                const w = config.vdWidth || 1920;
+                                                                const h = config.vdHeight || 1080;
+                                                                setConfig({
+                                                                    ...config,
+                                                                    startApp: app.package,
+                                                                    vdOrientation: 'portrait',
+                                                                    vdWidth: Math.min(w, h),
+                                                                    vdHeight: Math.max(w, h),
+                                                                });
+                                                            } else {
+                                                                handleChange('startApp', app.package);
+                                                            }
+                                                            setAppSearch(app.name || app.package);
+                                                            setAppPickerOpen(false);
+                                                        }}
+                                                        className={`w-full px-2.5 py-2 text-left border-t border-zinc-900/80 transition-colors ${config.startApp === app.package ? 'bg-primary/10 text-primary' : 'text-zinc-300 hover:bg-zinc-900'}`}
+                                                    >
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <div className="w-6 h-6 shrink-0 rounded-md border border-zinc-800 bg-zinc-900 flex items-center justify-center text-[10px] font-black text-primary">
+                                                                {(app.name || app.package).trim().charAt(0).toUpperCase() || 'A'}
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="text-[10px] font-bold truncate">{app.name || app.package}</div>
+                                                                <div className="text-[8px] text-zinc-600 font-mono truncate mt-0.5">{app.package}</div>
+                                                            </div>
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                                {filteredInstalledApps.length === 0 && (
+                                                    <div className="px-2.5 py-3 text-[9px] text-zinc-600 text-center">{t('controlPanel.noAppsFound')}</div>
+                                                )}
+                                                {filteredInstalledApps.length > 100 && (
+                                                    <div className="sticky bottom-0 px-2.5 py-1.5 text-[8px] text-zinc-600 bg-zinc-950 border-t border-zinc-800 text-center">
+                                                        {t('controlPanel.refineSearch')}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="com.example.app"
+                                        value={config.startApp || ''}
+                                        onChange={(e) => handleChange('startApp', e.target.value)}
+                                        className="flex-1 bg-zinc-950 border border-zinc-800 rounded-md px-2 py-1.5 text-[11px] text-zinc-300 focus:border-primary/60 focus:outline-none transition-colors font-mono"
+                                    />
+                                    {config.startApp && (
+                                        <button
+                                            onClick={() => handleChange('startApp', '')}
+                                            className="text-[8px] font-black text-zinc-600 hover:text-red-400 uppercase transition-colors"
+                                        >
+                                            {t('common.clear')}
+                                        </button>
+                                    )}
+                                </div>
+                                <p className="text-[8px] text-zinc-600 leading-relaxed">{t('controlPanel.startAppDescription')}</p>
                             </div>
 
                             <div className="space-y-2.5 pt-0.5">
